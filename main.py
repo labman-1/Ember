@@ -30,7 +30,10 @@ def main():
     event_bus = EventBus()
     state_manager = StateManager(event_bus)
     heartbeat = Heartbeat(event_bus, interval=settings.HEARTBEAT_INTERVAL)
-    memory = ShortTermMemory(base_prompt=settings.SYSTEM_PROMPT, context_window_size=settings.CONTEXT_WINDOW_SIZE)
+    memory = ShortTermMemory(
+        base_prompt=settings.SYSTEM_PROMPT,
+        context_window_size=settings.CONTEXT_WINDOW_SIZE,
+    )
     brain = Brain(event_bus, state_manager, memory)
 
     heartbeat.start()
@@ -48,6 +51,7 @@ def main():
     event_bus.subscribe("llm.finished", lambda e: print("\nuser:", end="", flush=True))
     event_bus.subscribe("llm.started", on_ai_start)
 
+    print("\n[依鸣已经在南京大学的校园内醒来...]")
     print("----------------------------")
     print("user:", end="", flush=True)
 
