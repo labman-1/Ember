@@ -41,9 +41,13 @@ class Settings:
     SYSTEM_PROMPT = PROMPTS.get("core_persona", "")
     STATE = PROMPTS.get("state", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
+
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
     STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30"))
+
     IDLE_STATE_UPDATE_PROMPT = PROMPTS.get("idle_state_update_prompt", "")
+    IDLE_SPEAKING_UPDATE_PROMPT = PROMPTS.get("idle_speaking_update_prompt", "")
+
     TIME_ACCEL_FACTOR = float(os.getenv("TIME_ACCEL_FACTOR", "1.0"))
     START_TIME = os.getenv(
         "START_TIME",

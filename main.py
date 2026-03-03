@@ -1,42 +1,65 @@
 import time
-from core.event_bus import EventBus
+import queue
+import threading
+from core.event_bus import EventBus, Event
 from core.heartbeat import Heartbeat
 from persona.state_manager import StateManager
 from brain.core import Brain
 from memory.short_term import ShortTermMemory
 from config.settings import settings
 import config.logging_config
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+input_queue = queue.Queue()
+
+
+def get_user_input():
+    while True:
+        user_input = input()
+        if user_input.lower() in ["exit", "quit"]:
+            logger.info("用户输入退出命令，程序将退出。")
+            break
+        input_queue.put(user_input)
+        logger.info(f"用户输入: {user_input}")
 
 
 def main():
     event_bus = EventBus()
     state_manager = StateManager(event_bus)
     heartbeat = Heartbeat(event_bus, interval=settings.HEARTBEAT_INTERVAL)
-
-    brain = Brain(event_bus, state_manager)
     memory = ShortTermMemory(base_prompt=settings.SYSTEM_PROMPT)
+    brain = Brain(event_bus, state_manager, memory)
 
     heartbeat.start()
 
-    print("✨ 依鸣已在校园中醒来...")
-    print("-------------------------")
+    threading.Thread(target=get_user_input, daemon=True).start()
 
-    try:
-        while True:
-            user_input = input("user: ")
-            if user_input.lower() in ["exit", "quit"]:
-                print("退出程序。")
-                break
+    def display_ai_chunk(event):
+        chunk = event.data["text"]
+        print(chunk, end="", flush=True)
 
-            print("依鸣:", end=" ", flush=True)
-            for chunk in brain.generate_response(user_input, memory):
-                print(chunk, end="", flush=True)
-            print()
+    def on_ai_start(event):
+        print("依鸣:", end=" ", flush=True)
 
-    except KeyboardInterrupt:
-        print("\n程序被用户中断。")
-    finally:
-        heartbeat.stop()
+    event_bus.subscribe("llm.chunk", display_ai_chunk)
+    event_bus.subscribe("llm.finished", lambda e: print("\nuser:", end="", flush=True))
+    event_bus.subscribe("llm.started", on_ai_start)
+
+    print("----------------------------")
+    print("user:", end="", flush=True)
+
+    while True:
+        try:
+            user_input = input_queue.get(block=True, timeout=0.1)
+            if user_input:
+                event_bus.publish(Event(name="user.input", data={"text": user_input}))
+        except queue.Empty:
+            pass
+
+    heartbeat.stop()
 
 
 if __name__ == "__main__":
