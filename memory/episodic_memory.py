@@ -23,6 +23,7 @@ class EpisodicMemory:
         )
         self._init_db()
         self.store_queue = Queue()
+        self.event_bus = event_bus
 
         self.llm_client = LLMClient()
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)

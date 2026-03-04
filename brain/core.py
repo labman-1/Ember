@@ -55,9 +55,6 @@ class Brain:
             .strip()
             .lower()
         )
-        logger.info(
-            f"LLM判断是否需要相关记忆: {need_memory}\n\n当前对话历史: {settings.MEMORY_JUDGE_PROMPT}\n\n对话历史：{history}\n\n用户最新消息：{user_message}"
-        )
         memories = None
         if need_memory == "yes":
             logger.info("LLM判断需要相关记忆，正在查询...")

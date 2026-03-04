@@ -89,7 +89,7 @@ class StateManager:
 
     def _update_state(self, new_state):
         logical_time_str = self._format_logical_time(self._get_logical_now())
-        new_state["状态时间"] = logical_time_str
+        new_state["对应时间"] = logical_time_str
         self._async_log(
             "chat_history.log",
             f"{{状态更新: {json.dumps(new_state, ensure_ascii=False)}}}",
