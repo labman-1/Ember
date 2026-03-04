@@ -94,6 +94,8 @@ class StateManager:
             "chat_history.log",
             f"{{状态更新: {json.dumps(new_state, ensure_ascii=False)}}}",
         )
+        with open("./config/state.json", "w", encoding="utf-8") as f:
+            json.dump(new_state, f, ensure_ascii=False, indent=2)
         self.current_state.update(new_state)
 
     def _on_llm_state_update(self, event: Event):
