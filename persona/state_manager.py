@@ -19,7 +19,7 @@ class StateManager:
 
         self.last_interaction_logical_time = self.event_bus.logical_now
 
-        self.current_state = json.loads(settings.STATE)
+        self.current_state = settings.STATE
         self.is_thinking = False
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
