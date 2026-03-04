@@ -12,6 +12,9 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 
 
+logger = logging.getLogger(__name__)
+
+
 class EpisodicMemory:
     def __init__(self, event_bus: EventBus):
         self.conn = psycopg2.connect(
@@ -84,7 +87,6 @@ class EpisodicMemory:
             event_data["embedding"] = embedding
             event_data["insight_embedding"] = insight_embedding
             self._add_memory(event_data)
-            logging.info(f"上传短期记忆：{content}")
         except Exception as e:
             logging.error(f"Failed to process memory store request: {e}")
 
@@ -172,7 +174,6 @@ class EpisodicMemory:
                     event_data.get("importance", 1.0),
                 ),
             )
-            logging.info(f"Stored memory: {event_data.get('content', '')}")
             self.conn.commit()
 
     def _query_by_similarity(self, query_vector):
