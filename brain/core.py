@@ -40,7 +40,7 @@ class Brain:
 
     def process_dialogue(self, user_message):
         self.memory.add_message("user", user_message)
-        history = json.dumps(self.memory.get_memory())
+        history = json.dumps(self.memory.get_memory(), ensure_ascii=False)
 
         resp = self.llm_client.one_chat(
             model_config=settings.SMALL_LLM,
@@ -60,7 +60,7 @@ class Brain:
         memories = None
         if need_memory:
             logger.info("LLM判断需要相关记忆，正在查询...")
-            memories = json.dumps(self.get_persistence_memory(data))
+            memories = json.dumps(self.get_persistence_memory(data), ensure_ascii=False)
             self.memory.async_log("chat_history.log", f"Memory: {memories}")
 
         dynamic_prompt = settings.SYSTEM_PROMPT + self.state_manager.prompt_injection
