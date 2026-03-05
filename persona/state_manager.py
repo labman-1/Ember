@@ -105,7 +105,8 @@ class StateManager:
         self.state_update_timeout = settings.STATE_IDLE_MIN_TIMEOUT
         self.is_thinking = True
         history = event.data.get("history", [])
-        prompt = f"{settings.SYSTEM_PROMPT}\n\n{settings.STATE_UPDATE_PROMPT}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}"
+        logical_now_str = self._format_logical_time(self._get_logical_now())
+        prompt = f"{settings.SYSTEM_PROMPT}\n\n当前的准确时间: {logical_now_str}\n\n{settings.STATE_UPDATE_PROMPT}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}"
 
         try:
             response = self._ask_llm(settings.SYSTEM_PROMPT, prompt)
@@ -180,7 +181,7 @@ class StateManager:
     @property
     def prompt_injection(self):
         state_text = json.dumps(self.current_state, ensure_ascii=False, indent=2)
-        return f"\n\n###依鸣的当前状态###\n{state_text}\n\n"
+        return f"\n\n###依鸣的前一时刻状态###\n{state_text}\n\n"
 
     @property
     def speaking_prompt_injection(self):

@@ -91,34 +91,24 @@ class EpisodicMemory:
             logger.error(f"Failed to process memory store request: {e}")
 
     def _on_query_request(self, event: Event):
-        query = event.data.get("query", "")
-        if not query:
+        query = event.data.get("user_message", "")
+        key_words = event.data.get("key_words", [])
+        if not query and not key_words:
+            if "callback" in event.data:
+                event.data["callback"]([])
             return
 
-        def get_embedding_task():
-            return self.llm_client.get_embedding(settings.EMBEDDING_MODEL, query)
-
-        def get_keywords_task():
-            prompt = f"从以下查询中提取3-5个核心关键词，以逗号分隔：{query}"
-            response = self.llm_client.one_chat(settings.SMALL_LLM, prompt)
-            keywords = [k.strip() for k in response.split(",") if k.strip()]
-            return keywords
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_embedding = executor.submit(get_embedding_task)
-            future_keywords = executor.submit(get_keywords_task)
+        embedding = None
+        if query:
             try:
-                embedding = future_embedding.result(timeout=10)
-                keywords = future_keywords.result(timeout=10)
-            except Exception as e:
-                logger.warning(
-                    f"Error occurred while retrieving embedding or keywords: {e}"
+                embedding = self.llm_client.get_embedding(
+                    settings.EMBEDDING_MODEL, query
                 )
-                embedding = None
-                keywords = []
+            except Exception as e:
+                logger.error(f"Embedding query failed: {e}")
 
         memories_sim = self._query_by_similarity(embedding) if embedding else []
-        memories_key = self._query_by_keywords(keywords) if keywords else []
+        memories_key = self._query_by_keywords(key_words) if key_words else []
 
         seen_ids = set()
         combined_memories = []
@@ -182,10 +172,8 @@ class EpisodicMemory:
             cur.execute(
                 """
                 SELECT id, content, insight, importance, confidence, access_count, last_accessed, metadata,
-                
                 (1 - (embedding <=> %s::vector)) as similarity1,
                 (1 - (insight_embedding <=> %s::vector)) as similarity2,
-                (EXTRACT(EPOCH FROM (%s - last_accessed)) / 3600.0) as dt_hours,
                 time
                 FROM episodic_memory ORDER BY 
                 GREATEST((1 - (embedding <=> %s::vector)), (1 - (insight_embedding <=> %s::vector))) 
@@ -196,7 +184,6 @@ class EpisodicMemory:
                 (
                     query_vector,
                     query_vector,
-                    time_now,
                     query_vector,
                     query_vector,
                     settings.MEMORY_DECENT_FACTOR,
@@ -208,8 +195,6 @@ class EpisodicMemory:
             rows = results
             memories = []
 
-            k = settings.MEMORY_DECENT_FACTOR
-
             for row in rows:
                 memories.append(
                     {
@@ -219,7 +204,7 @@ class EpisodicMemory:
                         "importance": row[3],
                         "confidence": row[4],
                         "metadata": row[7],
-                        "time": row[11],
+                        "time": row[10].isoformat() if hasattr(row[10], 'isoformat') else str(row[10]),
                     }
                 )
 
@@ -251,7 +236,7 @@ class EpisodicMemory:
                         "importance": row[3],
                         "confidence": row[4],
                         "metadata": row[7],
-                        "time": row[9],
+                        "time": row[9].isoformat() if hasattr(row[9], 'isoformat') else str(row[9]),
                     }
                 )
             return memories

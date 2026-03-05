@@ -42,23 +42,25 @@ class Brain:
         self.memory.add_message("user", user_message)
         history = json.dumps(self.memory.get_memory())
 
-        need_memory = (
-            self.llm_client.one_chat(
-                model_config=settings.SMALL_LLM,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"{settings.MEMORY_JUDGE_PROMPT}\n\n对话历史：{history}\n\n用户最新消息：{user_message}",
-                    }
-                ],
-            )
-            .strip()
-            .lower()
+        resp = self.llm_client.one_chat(
+            model_config=settings.SMALL_LLM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"{settings.MEMORY_JUDGE_PROMPT}\n\n对话历史：{history}",
+                }
+            ],
         )
+        resp = resp.replace("True", "true").replace("False", "false")
+        resp = json.loads(resp)
+
+        need_memory = resp.get("need_memory", False)
+        keywords = resp.get("keywords", [])
+        data = {"user_message": user_message, "key_words": keywords}
         memories = None
-        if need_memory == "yes":
+        if need_memory:
             logger.info("LLM判断需要相关记忆，正在查询...")
-            memories = json.dumps(self.get_persistence_memory(user_message))
+            memories = json.dumps(self.get_persistence_memory(data))
             self.memory.async_log("chat_history.log", f"Memory: {memories}")
 
         dynamic_prompt = settings.SYSTEM_PROMPT + self.state_manager.prompt_injection
@@ -69,14 +71,14 @@ class Brain:
 
         self._llm_speak(self.memory, pack=False)
 
-    def get_persistence_memory(self, user_message):
+    def get_persistence_memory(self, query_data):
         future = concurrent.futures.Future()
 
         def on_memory_retrieved(memories):
             logger.info(f"Retrieved relevant memories: {memories}")
             future.set_result(memories)
 
-        query_data = {"query": user_message, "callback": on_memory_retrieved}
+        query_data["callback"] = on_memory_retrieved
         self.event_bus.publish(Event("memory.query", query_data))
         return future.result()
 

@@ -67,6 +67,7 @@ class Settings:
 
     MEMORY_JUDGE_PROMPT = PROMPTS.get("memory_judge_prompt", "")
     MEMORY_ENCODING_PROMPT = PROMPTS.get("memory_encoding_prompt", "")
+    MEMORY_DECENT_FACTOR = float(os.getenv("MEMORY_DECENT_FACTOR", "0.5"))
     RECALL_TOP_K = int(os.getenv("RECALL_TOP_K", "10"))
 
 
