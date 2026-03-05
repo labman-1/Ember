@@ -1,5 +1,6 @@
 import json
 import threading
+import os
 
 
 class ShortTermMemory:
@@ -14,9 +15,8 @@ class ShortTermMemory:
 
     def _load_memory(self):
         try:
-            import os
-            if os.path.exists("chat_memory.json"):
-                with open("chat_memory.json", "r", encoding="utf-8") as f:
+            if os.path.exists("./config/chat_memory.json"):
+                with open("./config/chat_memory.json", "r", encoding="utf-8") as f:
                     self.memory = json.load(f)
                     self._truncate_memory()
         except Exception as e:
@@ -49,18 +49,18 @@ class ShortTermMemory:
         threading.Thread(target=_log).start()
 
     def add_message(self, role, content):
-        self.async_log("chat_history.log", f"{role}: {content}")
+        self.async_log("./config/chat_history.log", f"{role}: {content}")
         self._add_back(role, content)
         self._save_memory()
 
     def _save_memory(self):
         def _save():
             try:
-                with open("chat_memory.json", "w", encoding="utf-8") as f:
+                with open("./config/chat_memory.json", "w", encoding="utf-8") as f:
                     json.dump(self.memory, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 print(f"Error saving memory: {e}")
-        
+
         threading.Thread(target=_save).start()
 
     def update_base_prompt(self, new_base_prompt):
@@ -77,4 +77,4 @@ class ShortTermMemory:
 
     def clear_memory(self):
         self.memory = []
-        self._async_log_clear("chat_history.log")
+        self._async_log_clear("./config/chat_history.log")

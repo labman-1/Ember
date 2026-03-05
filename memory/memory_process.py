@@ -17,9 +17,9 @@ class Hippocampus:
 
     def _load_experience(self):
         try:
-            with open("chat_history.log", "r", encoding="utf-8") as f:
+            with open("./config/chat_history.log", "r", encoding="utf-8") as f:
                 content = f.read()
-            with open("chat_history.log", "w", encoding="utf-8") as f:
+            with open("./config/chat_history.log", "w", encoding="utf-8") as f:
                 f.write("")
             return content
 

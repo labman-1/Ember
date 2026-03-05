@@ -10,5 +10,4 @@ services:
       POSTGRES_PASSWORD: your_password
     volumes:
       - ./data/db/postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     restart: always

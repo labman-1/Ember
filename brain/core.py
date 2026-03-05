@@ -62,7 +62,7 @@ class Brain:
             logger.info("LLM判断需要相关记忆，正在查询...")
             logger.info(f"查询关键词: {keywords}")
             memories = json.dumps(self.get_persistence_memory(data), ensure_ascii=False)
-            self.memory.async_log("chat_history.log", f"Memory: {memories}")
+            self.memory.async_log("./config/chat_history.log", f"Memory: {memories}")
 
         dynamic_prompt = settings.SYSTEM_PROMPT + self.state_manager.prompt_injection
         if memories:
