@@ -58,11 +58,10 @@ class Brain:
         keywords = resp.get("keywords", [])
         data = {"user_message": user_message, "key_words": keywords}
         memories = None
-        if need_memory:
+        if need_memory or True:
             logger.info("LLM判断需要相关记忆，正在查询...")
             logger.info(f"查询关键词: {keywords}")
             memories = json.dumps(self.get_persistence_memory(data), ensure_ascii=False)
-            self.memory.async_log("./config/chat_history.log", f"Memory: {memories}")
 
         dynamic_prompt = settings.SYSTEM_PROMPT + self.state_manager.prompt_injection
         if memories:
@@ -77,7 +76,7 @@ class Brain:
 
         def on_memory_retrieved(memories):
             if not future.done():
-                logger.info(f"Retrieved relevant memories: {memories}")
+                logger.info(f"Retrieved relevant memories: {len(memories)} items")
                 future.set_result(memories)
 
         query_data["callback"] = on_memory_retrieved
