@@ -1,5 +1,6 @@
 import psycopg2
 from psycopg2.extras import Json, execute_values
+from pgvector.psycopg2 import register_vector
 import numpy as np
 import time
 import logging
@@ -41,6 +42,7 @@ class EpisodicMemory:
     def _init_db(self):
         with self.conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            register_vector(self.conn)
 
             cur.execute(
                 """
@@ -84,6 +86,11 @@ class EpisodicMemory:
             insight_embedding = self.llm_client.get_embedding(
                 settings.EMBEDDING_MODEL, insight
             )
+            
+            if embedding is None or insight_embedding is None:
+                logger.warning("Failed to get embeddings from LLM, skipping memory store.")
+                return
+
             event_data["embedding"] = embedding
             event_data["insight_embedding"] = insight_embedding
             self._add_memory(event_data)

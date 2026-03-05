@@ -76,12 +76,20 @@ class Brain:
         future = concurrent.futures.Future()
 
         def on_memory_retrieved(memories):
-            logger.info(f"Retrieved relevant memories: {memories}")
-            future.set_result(memories)
+            if not future.done():
+                logger.info(f"Retrieved relevant memories: {memories}")
+                future.set_result(memories)
 
         query_data["callback"] = on_memory_retrieved
-        self.event_bus.publish(Event("memory.query", query_data))
-        return future.result()
+        self.event_bus.publish(Event("memory.query", query_data))        
+        try:
+            return future.result(timeout=5)
+        except concurrent.futures.TimeoutError:
+            logger.error("查询持久化记忆超时，跳过查询以维持对话。")
+            return []
+        except Exception as e:
+            logger.error(f"查询持久化记忆时发生异常: {e}")
+            return []
 
     def _llm_speak(self, memory, pack: bool = False):
         with self.lock:

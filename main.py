@@ -36,7 +36,6 @@ def main():
         base_prompt=settings.SYSTEM_PROMPT,
         max_memory_size=settings.CONTEXT_WINDOW_SIZE,
     )
-    memory.clear_memory()
     brain = Brain(event_bus, state_manager, memory)
     episodic_memory = EpisodicMemory(event_bus)
     hippocampus = Hippocampus(event_bus)

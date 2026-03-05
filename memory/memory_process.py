@@ -25,10 +25,14 @@ class Hippocampus:
 
         except FileNotFoundError:
             logger.warning("chat_history.log not found")
-            return []
+            return ""
 
     def _on_preprocess_request(self, event: Event):
         res = self._load_experience()
+        if not res:
+            logger.info("No experience log found, skipping preprocessing.")
+            return
+
         system_prompt = settings.MEMORY_ENCODING_PROMPT
         user_prompt = f"提供的日志如下：\n\n{res}"
         resp = self.llm_client.one_chat(
@@ -38,10 +42,16 @@ class Hippocampus:
                 {"role": "user", "content": user_prompt},
             ],
         )
+
+        if resp is None:
+            logger.error("LLM returned no response during memory preprocessing (resp is None)")
+            return
+
         try:
             memories = json.loads(resp)
             for mem in memories:
                 logger.info(f"Preprocessed memory: {mem}")
                 self.event_bus.publish(Event("memory.store", mem))
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode LLM response: {e}")
+        except (TypeError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}")
+

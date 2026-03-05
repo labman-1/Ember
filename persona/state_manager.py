@@ -85,7 +85,7 @@ class StateManager:
             with open(filename, "a", encoding="utf-8", buffering=1) as f:
                 f.write(content + "\n")
 
-        threading.Thread(target=_log).start()
+        threading.Thread(target=_log,daemon=True).start()
 
     def _update_state(self, new_state):
         logical_time_str = self._format_logical_time(self._get_logical_now())

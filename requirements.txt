@@ -3,3 +3,4 @@ dotenv
 pyyaml
 psycopg2
 numpy
+pgvector
