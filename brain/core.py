@@ -60,6 +60,7 @@ class Brain:
         memories = None
         if need_memory:
             logger.info("LLM判断需要相关记忆，正在查询...")
+            logger.info(f"查询关键词: {keywords}")
             memories = json.dumps(self.get_persistence_memory(data), ensure_ascii=False)
             self.memory.async_log("chat_history.log", f"Memory: {memories}")
 
