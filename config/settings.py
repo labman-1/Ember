@@ -41,8 +41,9 @@ class Settings:
 
     with open("./config/state.json", "r", encoding="utf-8") as f:
         STATE = json.load(f)
-
-    SYSTEM_PROMPT = PROMPTS.get("core_persona", "")
+        
+    CORE_PERSONA = PROMPTS.get("core_persona", "")
+    SYSTEM_PROMPT = CORE_PERSONA+PROMPTS.get("system_prompt", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
 
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
