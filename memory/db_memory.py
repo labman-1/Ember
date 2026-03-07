@@ -77,6 +77,47 @@ class DBMemory:
     def start(self):
         threading.Thread(target=self._store_loop, daemon=True).start()
     
+    def get_history(self, limit=20, before_timestamp=None):
+        self._ensure_connection()
+        if not self.conn:
+            return []
+            
+        try:
+            with self.conn.cursor() as cur:
+                if before_timestamp:
+                    # 如果 before_timestamp 是数字（毫秒时间戳），使用 to_timestamp
+                    # 如果是字符串（ISO），直接比较
+                    if isinstance(before_timestamp, (int, float)):
+                        query = "SELECT id, timestamp, sender, text, thinking FROM message_list WHERE timestamp < to_timestamp(%s / 1000.0) ORDER BY timestamp DESC LIMIT %s"
+                    else:
+                        query = "SELECT id, timestamp, sender, text, thinking FROM message_list WHERE timestamp < %s ORDER BY timestamp DESC LIMIT %s"
+                    cur.execute(query, (before_timestamp, limit))
+                else:
+                    cur.execute("""
+                        SELECT id, timestamp, sender, text, thinking 
+                        FROM message_list 
+                        ORDER BY timestamp DESC 
+                        LIMIT %s
+                    """, (limit,))
+                
+                rows = cur.fetchall()
+                messages = []
+                for row in rows:
+                    raw_ts = row[1]
+                    ts_value = int(raw_ts.timestamp() * 1000) if hasattr(raw_ts, 'timestamp') else 0
+                    
+                    messages.append({
+                        "id": row[0],
+                        "timestamp": ts_value,
+                        "role": "ai" if row[2] == "assistant" else "user",
+                        "content": row[3],
+                        "thinking": row[4]
+                    })
+                return messages
+        except Exception as e:
+            logger.error(f"Failed to fetch history: {e}")
+            return []
+
     def _store_loop(self):
         while True:
             data = self.store_queue.get()
