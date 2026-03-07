@@ -196,7 +196,7 @@ class EpisodicMemory:
                     WHERE clarity > 0.01
                     """, (settings.MEMORY_DECENT_FACTOR,))
                 cur.execute(
-                    "DELETE FROM episodic_memory WHERE clarity < 0.05 AND access_count < 5"
+                    "DELETE FROM episodic_memory WHERE clarity < 0.05"
                 )
                 self.conn.commit()
                 logger.info("Memory cleanup (deleted low clarity memories) completed.")
