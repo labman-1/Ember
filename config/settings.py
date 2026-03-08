@@ -53,19 +53,21 @@ class Settings:
                 STATE = json.load(f)
             except json.JSONDecodeError:
                 STATE = {}
-    
+
     if not STATE and os.path.exists("./config/state_default.json"):
         with open("./config/state_default.json", "r", encoding="utf-8") as f:
             try:
                 STATE = json.load(f)
             except json.JSONDecodeError:
                 STATE = {}
-                
+        with open("./config/state.json", "w", encoding="utf-8") as f:
+            json.dump(STATE, f, ensure_ascii=False, indent=2)
+
     logger.info(f"Loaded state: {STATE}")
 
-    CHARACTER_NAME=os.getenv("CHARACTER_NAME", "依鸣")
+    CHARACTER_NAME = os.getenv("CHARACTER_NAME", "依鸣")
     CORE_PERSONA = PROMPTS.get("core_persona", "")
-    SYSTEM_PROMPT = CORE_PERSONA+PROMPTS.get("system_prompt", "")
+    SYSTEM_PROMPT = CORE_PERSONA + PROMPTS.get("system_prompt", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
 
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
@@ -79,7 +81,7 @@ class Settings:
         "START_TIME",
         time.time(),
     )
-    if START_TIME=="?":
+    if START_TIME == "?":
         with open("./config/state.json", "r", encoding="utf-8") as f:
             state_data = json.load(f)
         START_TIME = state_data.get("对应时间", time.time())

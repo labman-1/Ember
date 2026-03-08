@@ -5,7 +5,7 @@
 arrangement.txt
 
 # =========================
-# Python & »·¾³Ïà¹Ø
+# Python & ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 # =========================
 __pycache__/
 *.py[cod]
@@ -13,13 +13,13 @@ __pycache__/
 *.so
 .Python
 
-# ÐéÄâ»·¾³ (Virtual Environments)
+# (Virtual Environments)
 venv/
 .venv/
 env/
 ENV/
 
-# °ü¹ÜÀí¹¤¾ßÉú³ÉµÄÄ¿Â¼
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Éµï¿½Ä¿Â¼
 *.egg-info/
 .installed.cfg
 *.egg

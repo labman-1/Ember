@@ -26,12 +26,10 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"WebSocket client connected. Total: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            logger.info(f"WebSocket client disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         """Pure async broadcast"""
@@ -84,7 +82,6 @@ class EmberServer:
         @self.app.on_event("startup")
         async def startup_event():
             self.loop = asyncio.get_running_loop()
-            logger.info(f"Event loop ready: {self.loop}")
 
         @self.app.get("/config")
         async def get_config():
