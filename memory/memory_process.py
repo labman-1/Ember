@@ -45,47 +45,57 @@ class Hippocampus:
         )
 
         if resp is None:
-            logger.error("LLM returned no response during memory preprocessing (resp is None)")
+            logger.error(
+                "LLM returned no response during memory preprocessing (resp is None)"
+            )
             return
 
         try:
-            memories = json.loads(resp)
+            memories = self.llm_client._extract_json(resp)
+            if memories is None:
+                raise json.JSONDecodeError("Failed to extract JSON", resp, 0)
+
             for mem in memories:
                 logger.info(f"Preprocessed memory: {mem}")
                 self.event_bus.publish(Event("memory.store", mem))
         except (TypeError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}")
-            
-            
-    def road_memory(self,content):
-        system_prompt=settings.CORE_PERSONA+settings.MEMORY_JUDGE_PROMPT
+            logger.error(
+                f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}"
+            )
+
+    def road_memory(self, content):
+        system_prompt = settings.CORE_PERSONA + settings.MEMORY_JUDGE_PROMPT
         logger.info(f"Loading Memory\n")
         user_prompt = f"提供的日志如下：\n\n{content}"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        resp=self.llm_client.one_chat(
-            settings.SMALL_LLM,
-            messages=messages
-        )
-        key_words=[]
-        query=""
-        memories=None
+        resp = self.llm_client.one_chat(settings.SMALL_LLM, messages=messages)
+        key_words = []
+        query = ""
+        memories = None
         try:
-            resp_json=json.loads(resp)
-            key_words=resp_json.get("keywords",[])
-            query=resp_json.get("query","")
+            resp_json = self.llm_client._extract_json(resp)
+            if resp_json is None:
+                raise json.JSONDecodeError("Failed to extract JSON", resp, 0)
+
+            key_words = resp_json.get("keywords", [])
+            query = resp_json.get("query", "")
             data = {"query": query, "key_words": key_words}
-            memories=json.dumps(self._get_persistence_memory(data), ensure_ascii=False)
+            memories = json.dumps(
+                self._get_persistence_memory(data), ensure_ascii=False
+            )
             logger.info(f"Road Memory\nQuery: {query}\nKey Words: {key_words}\n")
-            
+
         except (TypeError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to decode LLM response during memory loading: {e}. Raw response: {repr(resp)}")
-            
+            logger.error(
+                f"Failed to decode LLM response during memory loading: {e}. Raw response: {repr(resp)}"
+            )
+
         finally:
             return memories
-    
+
     def _get_persistence_memory(self, query_data):
         future = concurrent.futures.Future()
 
@@ -95,7 +105,7 @@ class Hippocampus:
                 future.set_result(memories)
 
         query_data["callback"] = on_memory_retrieved
-        self.event_bus.publish(Event("memory.query", query_data))        
+        self.event_bus.publish(Event("memory.query", query_data))
         try:
             return future.result(timeout=5)
         except concurrent.futures.TimeoutError:
@@ -104,5 +114,3 @@ class Hippocampus:
         except Exception as e:
             logger.error(f"查询持久化记忆时发生异常: {e}")
             return []
-        
-        

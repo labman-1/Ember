@@ -16,13 +16,15 @@ from config.settings import settings
 from memory.episodic_memory import EpisodicMemory
 from memory.memory_process import Hippocampus
 from memory.db_memory import DBMemory
+from config.logging_config import get_logger
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger("EmberServer")
+logger = get_logger(__name__)
+
 
 class ConnectionManager:
     """Async connection manager"""
+
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
@@ -38,7 +40,7 @@ class ConnectionManager:
         """Pure async broadcast"""
         if not self.active_connections:
             return
-        
+
         payload = json.dumps(message, ensure_ascii=False)
         tasks = []
         for connection in self.active_connections:
@@ -51,6 +53,7 @@ class ConnectionManager:
         except Exception:
             self.disconnect(websocket)
 
+
 class EmberServer:
     def __init__(self):
         self.app = FastAPI()
@@ -62,7 +65,10 @@ class EmberServer:
         
         # Initialize components
         self.heartbeat = Heartbeat(self.event_bus, interval=settings.HEARTBEAT_INTERVAL)
-        self.memory = ShortTermMemory(base_prompt=settings.SYSTEM_PROMPT, max_memory_size=settings.CONTEXT_WINDOW_SIZE)
+        self.memory = ShortTermMemory(
+            base_prompt=settings.SYSTEM_PROMPT,
+            max_memory_size=settings.CONTEXT_WINDOW_SIZE,
+        )
         self.episodic_memory = EpisodicMemory(self.event_bus)
         self.hippocampus = Hippocampus(self.event_bus)
         self.db_memory = DBMemory(self.event_bus)
@@ -100,7 +106,7 @@ class EmberServer:
                 "character_name": "Ember",
                 "display_name": settings.CHARACTER_NAME,
                 "state": self.state_manager.current_state,
-                "logical_time": self.event_bus.formatted_logical_now
+                "logical_time": self.event_bus.formatted_logical_now,
             }
 
         @self.app.get("/history")
@@ -131,14 +137,18 @@ class EmberServer:
                     user_input = message.get("content")
                     if user_input:
                         ts = int(self.event_bus.logical_now * 1000)
-                        await self.manager.broadcast({
-                            "type": "message",
-                            "sender": "user",
-                            "content": user_input,
-                            "timestamp": ts,
-                            "id": ts
-                        })
-                        self.event_bus.publish(Event(name="user.input", data={"text": user_input}))
+                        await self.manager.broadcast(
+                            {
+                                "type": "message",
+                                "sender": "user",
+                                "content": user_input,
+                                "timestamp": ts,
+                                "id": ts,
+                            }
+                        )
+                        self.event_bus.publish(
+                            Event(name="user.input", data={"text": user_input})
+                        )
             except WebSocketDisconnect:
                 self.manager.disconnect(websocket)
             except Exception as e:
@@ -210,8 +220,10 @@ class EmberServer:
     def start(self):
         self.heartbeat.start()
         import uvicorn
+
         logger.info(">>> Ember Server starting...")
         uvicorn.run(self.app, host="0.0.0.0", port=8000, loop="asyncio")
+
 
 if __name__ == "__main__":
     server = EmberServer()

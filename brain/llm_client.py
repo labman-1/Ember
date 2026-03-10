@@ -1,5 +1,7 @@
 from openai import OpenAI
 import logging
+import re
+import json
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,27 @@ class LLMClient:
             api_key=settings.EMBEDDING_MODEL.api_key,
             base_url=settings.EMBEDDING_MODEL.base_url,
         )
+
+    def _extract_json(self, content):
+        """Extract JSON from potential markdown code blocks."""
+        if not content:
+            return None
+
+        # Try to find JSON block
+        json_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
+        match = re.search(json_pattern, content)
+        if match:
+            content = match.group(1)
+
+        content = content.strip()
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If standard parsing fails, try cleaning some common issues or just return None
+            logger.error(
+                f"Failed to parse extracted content as JSON: {content[:100]}..."
+            )
+            return None
 
     def one_chat(self, model_config, messages):
         client = (
