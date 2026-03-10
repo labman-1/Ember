@@ -143,7 +143,10 @@ class StateManager:
             response = self._ask_llm(settings.CORE_PERSONA, prompt)
             if response:
 
-                new_state = json.loads(response)
+                new_state = self.llm_client._extract_json(response)
+                if new_state is None:
+                    raise json.JSONDecodeError("Failed to extract JSON", response, 0)
+
                 new_state["对应时间"] = logical_now_str
                 self._update_state(new_state, logical_now=logical_now)
 
@@ -179,7 +182,10 @@ class StateManager:
         try:
             response = self._ask_llm(settings.CORE_PERSONA, prompt)
             if response:
-                data = json.loads(response)
+                data = self.llm_client._extract_json(response)
+                if data is None:
+                    raise json.JSONDecodeError("Failed to extract JSON", response, 0)
+
                 impulse = data.get("action_pulse", {})
 
                 if "action_pulse" in data:
