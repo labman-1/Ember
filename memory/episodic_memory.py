@@ -22,10 +22,10 @@ class EpisodicMemory:
         self.conn = None
         self._ensure_connection()
         self._init_db()
-        
+
         self.store_queue = Queue()
         self.llm_client = LLMClient()
-        
+
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
 
@@ -43,7 +43,7 @@ class EpisodicMemory:
                     password=settings.PG_PASSWORD,
                     host=settings.PG_HOST,
                     port=settings.PG_PORT,
-                    connect_timeout=5
+                    connect_timeout=5,
                 )
                 register_vector(self.conn)
                 logger.debug("EpisodicMemory connected to PostgreSQL.")
@@ -53,7 +53,8 @@ class EpisodicMemory:
 
     def _init_db(self):
         self._ensure_connection()
-        if not self.conn: return
+        if not self.conn:
+            return
         try:
             with self.conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
@@ -80,7 +81,8 @@ class EpisodicMemory:
                 self.conn.commit()
         except Exception as e:
             logger.error(f"Failed to init DB: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
 
     def _on_store_request(self, event: Event):
         self.store_queue.put({"type": "store", "data": event.data})
@@ -90,7 +92,7 @@ class EpisodicMemory:
             task = self.store_queue.get()
             if task is None:
                 break
-            
+
             try:
                 if task["type"] == "store":
                     self._async_store_process(task["data"])
@@ -110,14 +112,16 @@ class EpisodicMemory:
             insight_embedding = self.llm_client.get_embedding(
                 settings.EMBEDDING_MODEL, insight
             )
-            
+
             if embedding is None or insight_embedding is None:
-                logger.warning("Failed to get embeddings from LLM, skipping memory store.")
+                logger.warning(
+                    "Failed to get embeddings from LLM, skipping memory store."
+                )
                 return
 
             event_data["embedding"] = embedding
             event_data["insight_embedding"] = insight_embedding
-            
+
             self._ensure_connection()
             if self.conn:
                 self._add_memory(event_data)
@@ -143,7 +147,8 @@ class EpisodicMemory:
 
         self._ensure_connection()
         if not self.conn:
-            if "callback" in event.data: event.data["callback"]([])
+            if "callback" in event.data:
+                event.data["callback"]([])
             return
 
         memories_sim = self._query_by_similarity(embedding) if embedding else []
@@ -153,6 +158,7 @@ class EpisodicMemory:
         combined_memories = []
         for m in memories_sim + memories_key:
             if m["id"] not in seen_ids:
+                logger.debug(f"Memory matched: {m['content'][:50]}... (ID: {m['id']})")
                 combined_memories.append(m)
                 seen_ids.add(m["id"])
 
@@ -165,7 +171,8 @@ class EpisodicMemory:
 
     def _execute_update_access(self, event_id):
         self._ensure_connection()
-        if not self.conn: return
+        if not self.conn:
+            return
         try:
             with self.conn.cursor() as cur:
                 cur.execute(
@@ -181,28 +188,32 @@ class EpisodicMemory:
                 self.conn.commit()
         except Exception as e:
             logger.error(f"Failed to update access count for memory {event_id}: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
 
     def _sleep_memory_process(self, event: Event):
         self._ensure_connection()
-        if not self.conn: return
+        if not self.conn:
+            return
         try:
             with self.conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE episodic_memory
                     SET clarity = clarity * exp(
                             -%s / (1.0 + ln(1.0 + access_count))
                         )
                     WHERE clarity > 0.01
-                    """, (settings.MEMORY_DECENT_FACTOR,))
-                cur.execute(
-                    "DELETE FROM episodic_memory WHERE clarity < 0.05"
+                    """,
+                    (settings.MEMORY_DECENT_FACTOR,),
                 )
+                cur.execute("DELETE FROM episodic_memory WHERE clarity < 0.05")
                 self.conn.commit()
                 logger.info("Memory cleanup (deleted low clarity memories) completed.")
         except Exception as e:
             logger.error(f"Memory cleanup failed: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
 
     def _add_memory(self, event_data):
         try:
@@ -228,7 +239,8 @@ class EpisodicMemory:
                 self.conn.commit()
         except Exception as e:
             logger.error(f"Failed to add memory to DB: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
 
     def _query_by_similarity(self, query_vector):
         try:
@@ -240,7 +252,7 @@ class EpisodicMemory:
                     (1 - (insight_embedding <=> %s::vector)) as similarity2,
                     time
                     FROM episodic_memory 
-                    ORDER BY (GREATEST((1 - (embedding <=> %s::vector)), (1 - (insight_embedding <=> %s::vector))) * clarity) DESC
+                    ORDER BY GREATEST((1 - (embedding <=> %s::vector)), (1 - (insight_embedding <=> %s::vector))) DESC, clarity DESC
                     LIMIT %s
                     """,
                     (
@@ -254,19 +266,26 @@ class EpisodicMemory:
                 results = cur.fetchall()
                 memories = []
                 for row in results:
-                    memories.append({
-                        "id": row[0],
-                        "content": row[1],
-                        "insight": row[2],
-                        "importance": row[3],
-                        "confidence": row[4],
-                        "metadata": row[7],
-                        "time": row[10].isoformat() if hasattr(row[10], 'isoformat') else str(row[10]),
-                    })
+                    memories.append(
+                        {
+                            "id": row[0],
+                            "content": row[1],
+                            "insight": row[2],
+                            "importance": row[3],
+                            "confidence": row[4],
+                            "metadata": row[7],
+                            "time": (
+                                row[10].isoformat()
+                                if hasattr(row[10], "isoformat")
+                                else str(row[10])
+                            ),
+                        }
+                    )
                 return memories
         except Exception as e:
             logger.error(f"Similarity query failed: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
             return []
 
     def _query_by_keywords(self, keywords: list):
@@ -297,19 +316,24 @@ class EpisodicMemory:
                 rows = cur.fetchall()
                 memories = []
                 for row in rows:
-                    memories.append({
-                        "id": row[0],
-                        "content": row[1],
-                        "insight": row[2],
-                        "importance": row[3],
-                        "confidence": row[4],
-                        "metadata": row[7],
-                        "time": row[9].isoformat() if hasattr(row[9], 'isoformat') else str(row[9]),
-                    })
+                    memories.append(
+                        {
+                            "id": row[0],
+                            "content": row[1],
+                            "insight": row[2],
+                            "importance": row[3],
+                            "confidence": row[4],
+                            "metadata": row[7],
+                            "time": (
+                                row[9].isoformat()
+                                if hasattr(row[9], "isoformat")
+                                else str(row[9])
+                            ),
+                        }
+                    )
                 return memories
         except Exception as e:
             logger.error(f"Keyword query failed: {e}")
-            if self.conn: self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
             return []
-
-            

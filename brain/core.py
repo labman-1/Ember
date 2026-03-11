@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 class Brain:
 
     def __init__(
-        self, event_bus: EventBus, state_manager: StateManager, memory: ShortTermMemory,hippocampus: Hippocampus
+        self,
+        event_bus: EventBus,
+        state_manager: StateManager,
+        memory: ShortTermMemory,
+        hippocampus: Hippocampus,
     ):
         self.lock = threading.Lock()
         self.llm_client = LLMClient()
@@ -43,15 +47,17 @@ class Brain:
     def process_dialogue(self, user_message):
         self.memory.add_message("user", user_message)
         history = json.dumps(self.memory.get_memory(), ensure_ascii=False)
-        state =self.state_manager.prompt_injection
+        state = self.state_manager.prompt_injection
         messages = [
-            "history:"+history,
-            "state:"+state,
+            "history:" + history,
+            "state:" + state,
         ]
-        memories = json.dumps(self.hippocampus.road_memory(messages), ensure_ascii=False)
+        memories = json.dumps(
+            self.hippocampus.road_memory(messages), ensure_ascii=False
+        )
         dynamic_prompt = settings.SYSTEM_PROMPT + self.state_manager.prompt_injection
         if memories:
-            dynamic_prompt += f"\n\n可能用到的记忆：{memories}"
+            dynamic_prompt += f"\n\n[脑海闪现的记忆]：{memories}"
 
         self.memory.update_base_prompt(dynamic_prompt)
 
@@ -98,4 +104,3 @@ class Brain:
                 self.event_bus.publish(
                     Event(name="user_interaction", data=self.memory.get_memory())
                 )
-                

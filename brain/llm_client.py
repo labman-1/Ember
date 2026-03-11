@@ -56,7 +56,7 @@ class LLMClient:
                 messages=messages,
                 extra_body={"enable_thinking": False},
                 stream=False,
-                temperature=0.3,
+                temperature=0.7,
             )
             full_response = response.choices[0].message.content
             return full_response

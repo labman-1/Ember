@@ -87,6 +87,10 @@ class Hippocampus:
                 self._get_persistence_memory(data), ensure_ascii=False
             )
             logger.info(f"Road Memory\nQuery: {query}\nKey Words: {key_words}\n")
+            for mem in json.loads(memories):
+                logger.info(
+                    f"Retrieved memory: {mem['content'][:50]}... (ID: {mem['id']})"
+                )
 
         except (TypeError, json.JSONDecodeError) as e:
             logger.error(
