@@ -69,6 +69,7 @@ class Settings:
     CORE_PERSONA = PROMPTS.get("core_persona", "")
     SYSTEM_PROMPT = CORE_PERSONA + PROMPTS.get("system_prompt", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
+    GRAPH_CONSOLIDATION_PROMPT = PROMPTS.get("graph_consolidation_prompt", "")
 
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
     STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30"))
@@ -93,6 +94,12 @@ class Settings:
     PG_USER = os.getenv("PG_USER", "postgres")
     PG_PASSWORD = os.getenv("PG_PASSWORD", "your_password")
     PG_DB = os.getenv("PG_DB", "ember_db")
+
+    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "your_password")
+    NEO4J_DB = os.getenv("NEO4J_DB", "neo4j")
+    ENABLE_NEO4J = os.getenv("ENABLE_NEO4J", "True").lower() == "true"
 
     MEMORY_JUDGE_PROMPT = PROMPTS.get("memory_judge_prompt", "")
     MEMORY_ENCODING_PROMPT = PROMPTS.get("memory_encoding_prompt", "")

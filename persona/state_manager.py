@@ -99,9 +99,11 @@ class StateManager:
         threading.Thread(target=_log, daemon=True).start()
 
     def _update_state(self, new_state, logical_now=None):
+        data = new_state.copy()
+        del data["近期综合轨迹"]
         self._async_log(
             "./config/chat_history.log",
-            f"{{状态更新: {json.dumps(new_state, ensure_ascii=False)}}}",
+            f"{{状态更新: {json.dumps(data, ensure_ascii=False)}}}",
         )
 
         self.event_bus.publish(Event("state.update", data={"new_state": new_state}))
@@ -133,11 +135,7 @@ class StateManager:
         logical_now_str = self._format_logical_time(logical_now)
         logger.info(f"[{logical_now_str}] 收到用户交互事件，准备更新状态...")
 
-        context_for_memory = f"时间: {logical_now_str}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}\n对话历史: {json.dumps(history, ensure_ascii=False)}"
-
-        memories = self.hippocampus.road_memory(context_for_memory)
-
-        prompt = f"当前的准确时间: {logical_now_str}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[可能相关的记忆]:\n{memories if memories else '[]'}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n{settings.STATE_UPDATE_PROMPT}"
+        prompt = f"当前的准确时间: {logical_now_str}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n{settings.STATE_UPDATE_PROMPT}"
 
         try:
             response = self._ask_llm(settings.CORE_PERSONA, prompt)
@@ -167,7 +165,7 @@ class StateManager:
 
         history = self.short_term_memory.get_memory().get("history", [])
 
-        context_for_memory = f"时间: {logical_now_str}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}\n对话历史: {json.dumps(history, ensure_ascii=False)}"
+        context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
 
         memories = self.hippocampus.road_memory(context_for_memory)
 
@@ -175,7 +173,7 @@ class StateManager:
 
         if memories:
             prompt = (
-                f"[可能相关的记忆]:\n{memories}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n"
+                f"[脑海闪现的记忆]:\n{memories}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n"
                 + prompt
             )
 
@@ -206,7 +204,7 @@ class StateManager:
                     self.is_sleeping = True
                     self.event_bus.publish(
                         Event(
-                            name="sleep",
+                            name="memory.sleep",
                             data={},
                         )
                     )

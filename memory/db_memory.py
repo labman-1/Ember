@@ -8,22 +8,17 @@ import threading
 import re
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
+from brain.tag_utils import extract_thought_and_speech
 
 logger = logging.getLogger(__name__)
 
 
 def separate_thought_and_speech(text):
-    thought_match = re.search(r"<thought>([\s\S]*?)</thought>", text)
-    thought = thought_match.group(1).strip() if thought_match else ""
-
-    if "</thought>" in text:
-        speech_match = re.search(r"[\s\S]*</thought>\s*([\s\S]*)", text)
-        speech = speech_match.group(1).strip() if speech_match else ""
-    else:
-        speech = re.sub(r"<thought>[\s\S]*", "", text).strip()
-        if not speech:
-            speech = text.strip()
-
+    """分离 thought 和 speech（使用增强的容错处理）"""
+    thought, speech = extract_thought_and_speech(text)
+    # 如果没有提取到 speech，返回原始文本
+    if not speech:
+        speech = text.strip()
     return thought, speech
 
 
@@ -36,6 +31,7 @@ class DBMemory:
         self._init_db()
         self.event_bus.subscribe("user.input", self._on_user_input)
         self.event_bus.subscribe("llm.finished", self._on_llm_finished)
+        self.event_bus.subscribe("state.update", self._on_state_update)
         self.start()
 
     def _ensure_connection(self):
@@ -69,6 +65,16 @@ class DBMemory:
             """
             )
             self.conn.commit()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS state_list (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    text TEXT
+                );
+            """
+            )
+            self.conn.commit()
 
     def _on_user_input(self, event: Event):
         data = {
@@ -77,7 +83,8 @@ class DBMemory:
             "thinking": "",
             "timestamp": self.event_bus.formatted_logical_now,
         }
-        self.store_queue.put(data)
+        content = {"data": data, "database": "message_list"}
+        self.store_queue.put(content)
 
     def _on_llm_finished(self, event: Event):
         thought, speech = separate_thought_and_speech(event.data["text"])
@@ -87,7 +94,8 @@ class DBMemory:
             "thinking": thought,
             "timestamp": self.event_bus.formatted_logical_now,
         }
-        self.store_queue.put(data)
+        content = {"data": data, "database": "message_list"}
+        self.store_queue.put(content)
 
     def start(self):
         threading.Thread(target=self._store_loop, daemon=True).start()
@@ -100,8 +108,6 @@ class DBMemory:
         try:
             with self.conn.cursor() as cur:
                 if before_timestamp:
-                    # 如果 before_timestamp 是数字（毫秒时间戳），使用 to_timestamp
-                    # 如果是字符串（ISO），直接比较
                     if isinstance(before_timestamp, (int, float)):
                         query = "SELECT id, timestamp, sender, text, thinking FROM message_list WHERE timestamp < to_timestamp(%s / 1000.0) ORDER BY timestamp DESC LIMIT %s"
                     else:
@@ -144,30 +150,49 @@ class DBMemory:
 
     def _store_loop(self):
         while True:
-            data = self.store_queue.get()
+            content = self.store_queue.get()
+            data = content["data"]
+            database_name = content.get("database", "message_list")
             try:
                 self._ensure_connection()
                 if not self.conn:
                     logger.warning("DB connection unavailable, retrying later...")
-                    self.store_queue.put(data)
+                    self.store_queue.put(content)
                     threading.Event().wait(1)
                     continue
 
                 with self.conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO message_list (sender, text, thinking, timestamp) 
-                        VALUES (%s, %s, %s, %s);
-                    """,
-                        (
-                            data["sender"],
-                            data["text"],
-                            data["thinking"],
-                            data["timestamp"],
-                        ),
-                    )
+                    if database_name == "state_list":
+                        cur.execute(
+                            """
+                            INSERT INTO state_list (text, timestamp) 
+                            VALUES (%s, %s);
+                        """,
+                            (data["text"], data["timestamp"]),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO message_list (sender, text, thinking, timestamp) 
+                            VALUES (%s, %s, %s, %s);
+                        """,
+                            (
+                                data["sender"],
+                                data["text"],
+                                data["thinking"],
+                                data["timestamp"],
+                            ),
+                        )
                     self.conn.commit()
             except Exception as e:
                 logger.error(f"Failed to store message: {e}")
                 if self.conn:
                     self.conn.rollback()
+
+    def _on_state_update(self, event: Event):
+        data = {
+            "text": json.dumps(event.data["new_state"]),
+            "timestamp": self.event_bus.formatted_logical_now,
+        }
+        content = {"data": data, "database": "state_list"}
+        self.store_queue.put(content)
