@@ -70,7 +70,7 @@ class Neo4jGraphMemory:
     def upsert_entity_with_mode(
         self, entity_type: str, properties: dict, is_increment: bool = True
     ):
-        """支持增量/覆盖模式的实体更新
+        """支持增量/覆盖模式的实体更新，自动处理别名匹配
 
         Args:
             entity_type: 实体类型 (Person, Location, Thing, Concept, Event, Organization)
@@ -82,11 +82,26 @@ class Neo4jGraphMemory:
 
         safe_type = self._safe_label(entity_type)
         name = properties["name"]
+        new_aliases = properties.get("aliases", [])
+        if isinstance(new_aliases, str):
+            new_aliases = [new_aliases]
+
+        # 查找匹配的已存在实体
+        matched_name = self._find_entity_by_name_or_alias(name, new_aliases)
+
+        # 如果找到匹配实体，使用其名称
+        final_name = matched_name if matched_name else name
+        properties["name"] = final_name
+
+        # 合并别名
+        if matched_name:
+            existing_aliases = self._get_entity_aliases(matched_name)
+            merged_aliases = list(set(existing_aliases + new_aliases + [name]))
+            properties["aliases"] = merged_aliases
 
         def _upsert_tx(tx):
             if is_increment:
                 # 增量更新：列表属性合并去重，其他属性覆盖
-                # 注意：需要 Neo4j 安装 APOC 插件，否则使用纯 Cypher 实现
                 query = f"""
                 MERGE (e:Entity {{name: $name}})
                 SET e:{safe_type}
@@ -94,7 +109,7 @@ class Neo4jGraphMemory:
                 SET e += $props
                 RETURN elementId(e) AS eid
                 """
-                result = tx.run(query, name=name, props=properties)
+                result = tx.run(query, name=final_name, props=properties)
             else:
                 # 覆盖更新：完全替换
                 query = f"""
@@ -102,13 +117,63 @@ class Neo4jGraphMemory:
                 SET e:{safe_type}, e = $props
                 RETURN elementId(e) AS eid
                 """
-                result = tx.run(query, name=name, props=properties)
+                result = tx.run(query, name=final_name, props=properties)
 
             record = result.single()
             return record["eid"] if record else None
 
         with self.driver.session(database=self.db_name) as session:
             return session.execute_write(_upsert_tx)
+
+    def _find_entity_by_name_or_alias(self, name: str, aliases: list = None) -> str:
+        """通过名称或别名查找已存在的实体
+
+        检查：
+        1. name 是否等于某个已存在实体的 name
+        2. name 是否在某个已存在实体的 aliases 中
+        3. aliases 中的值是否等于某个已存在实体的 name
+        4. aliases 中的值是否在某个已存在实体的 aliases 中
+
+        Returns:
+            匹配到的实体名称，无匹配返回 None
+        """
+        aliases = aliases or []
+
+        def _find_tx(tx):
+            # 构建所有待检查的值
+            all_values = [name] + aliases
+
+            # 查询：name 匹配 或 aliases 包含任一值
+            query = """
+            MATCH (e:Entity)
+            WHERE e.name IN $values 
+               OR (e.aliases IS NOT NULL AND ANY(alias IN e.aliases WHERE alias IN $values))
+            RETURN e.name AS matched_name
+            LIMIT 1
+            """
+            result = tx.run(query, values=all_values)
+            record = result.single()
+            return record["matched_name"] if record else None
+
+        with self.driver.session(database=self.db_name) as session:
+            return session.execute_read(_find_tx)
+
+    def _get_entity_aliases(self, name: str) -> list:
+        """获取实体的别名列表"""
+
+        def _get_tx(tx):
+            query = """
+            MATCH (e:Entity {name: $name})
+            RETURN e.aliases AS aliases
+            """
+            result = tx.run(query, name=name)
+            record = result.single()
+            if record and record["aliases"]:
+                return list(record["aliases"])
+            return []
+
+        with self.driver.session(database=self.db_name) as session:
+            return session.execute_read(_get_tx)
 
     def upsert_edge(
         self,
@@ -123,20 +188,24 @@ class Neo4jGraphMemory:
         Args:
             source: 起点实体名称
             target: 终点实体名称
-            relation: 关系类型
+            relation: 关系类型（支持中文）
             properties: 关系属性 (如 strength)
             is_increment: True=增量更新, False=覆盖更新
         """
         if not self._is_ready():
             return None
 
-        safe_rel = self._safe_label(relation)
+        if not relation:
+            logger.warning("关系类型为空")
+            return None
+
         props = properties or {}
 
         def _rel_tx(tx):
+            # 使用反引号包裹关系类型，支持中文
             query = f"""
             MATCH (a:Entity {{name: $source}}), (b:Entity {{name: $target}})
-            MERGE (a)-[r:{safe_rel}]->(b)
+            MERGE (a)-[r:`{relation}`]->(b)
             SET r += $props
             RETURN elementId(r) AS rid
             """
@@ -150,10 +219,12 @@ class Neo4jGraphMemory:
     def delete_relationship(self, from_name: str, to_name: str, rel_type: str):
         if not self._is_ready():
             return
-        safe_rel = self._safe_label(rel_type)
+        if not rel_type:
+            return
 
         def _del_rel_tx(tx):
-            query = f"MATCH (a:Entity {{name: $from_name}})-[r:{safe_rel}]->(b:Entity {{name: $to_name}}) DELETE r"
+            # 使用反引号包裹关系类型，支持中文
+            query = f"MATCH (a:Entity {{name: $from_name}})-[r:`{rel_type}`]->(b:Entity {{name: $to_name}}) DELETE r"
             tx.run(query, from_name=from_name, to_name=to_name)
 
         with self.driver.session(database=self.db_name) as session:
@@ -246,6 +317,100 @@ class Neo4jGraphMemory:
 
         with self.driver.session(database=self.db_name) as session:
             return session.execute_read(_context_tx)
+
+    def query_entities_by_names_with_aliases(self, names: list, hops: int = 1) -> dict:
+        """通过名称列表查询实体及其关系，支持别名匹配
+
+        Args:
+            names: 实体名称列表（可能是标准名或别名）
+            hops: 关系查询深度，默认1跳
+
+        Returns:
+            {
+                "entities": [{"name": "...", "bio": "...", ...}],
+                "relations": [{"source": "...", "target": "...", "relation": "...", ...}]
+            }
+        """
+        if not self._is_ready() or not names:
+            return {"entities": [], "relations": []}
+
+        def _query_tx(tx):
+            # 第一步：通过名称或别名匹配找到所有相关实体
+            match_query = """
+            MATCH (e:Entity)
+            WHERE e.name IN $names 
+               OR (e.aliases IS NOT NULL AND ANY(alias IN e.aliases WHERE alias IN $names))
+            RETURN e
+            """
+            entities_result = tx.run(match_query, names=names)
+            entities = []
+            entity_names = []
+
+            for record in entities_result:
+                e = dict(record["e"])
+                entities.append(e)
+                entity_names.append(e.get("name"))
+
+            if not entity_names:
+                return {"entities": [], "relations": []}
+
+            # 第二步：查询这些实体之间的关系
+            rel_query = f"""
+            MATCH (a:Entity)-[r]-(b:Entity)
+            WHERE a.name IN $entity_names AND b.name IN $entity_names
+            RETURN a.name AS source, type(r) AS relation, b.name AS target, properties(r) AS props
+            """
+            rels_result = tx.run(rel_query, entity_names=entity_names)
+            relations = []
+            for record in rels_result:
+                relations.append(
+                    {
+                        "source": record["source"],
+                        "relation": record["relation"],
+                        "target": record["target"],
+                        "properties": record["props"] or {},
+                    }
+                )
+
+            neighbor_query = """
+            UNWIND $entity_names AS center_name
+            CALL {
+              WITH center_name
+              MATCH (center:Entity {name: center_name})-[r]-(neighbor:Entity)
+              WHERE NOT neighbor.name IN $entity_names
+              WITH type(r) AS relation, neighbor, properties(r) AS rel_props
+              RETURN relation, neighbor, rel_props
+              ORDER BY rand()
+              LIMIT 5
+            }
+            RETURN center_name, relation, neighbor.name AS neighbor_name, 
+                   properties(neighbor) AS neighbor_props, rel_props
+            """
+            neighbor_result = tx.run(neighbor_query, entity_names=entity_names)
+
+            neighbor_entities = {}
+            for record in neighbor_result:
+                n_name = record["neighbor_name"]
+                if n_name not in neighbor_entities:
+                    neighbor_entities[n_name] = record["neighbor_props"] or {}
+                    neighbor_entities[n_name]["name"] = n_name
+
+                relations.append(
+                    {
+                        "source": record["center_name"],
+                        "relation": record["relation"],
+                        "target": n_name,
+                        "properties": record["rel_props"] or {},
+                    }
+                )
+
+            # 合并实体列表
+            all_entities = entities + list(neighbor_entities.values())
+
+            return {"entities": all_entities, "relations": relations}
+
+        with self.driver.session(database=self.db_name) as session:
+            return session.execute_read(_query_tx)
 
     def close(self):
         if self.driver:

@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import psycopg2
+from pgvector.psycopg2 import register_vector
 from core.event_bus import EventBus, Event
 from config.settings import settings
 from brain.llm_client import LLMClient
@@ -8,14 +10,17 @@ from memory.neo4j_memory import Neo4jGraphMemory
 
 logger = logging.getLogger(__name__)
 
+BATCH_SIZE = 30  # 每批处理的记忆数量
+
 
 class EntityExtractionMemory:
     """实体提取与知识图谱构建器
 
     负责：
-    1. 从感官摘要中提取实体和关系
-    2. 实体归一化与别名管理
-    3. 调用 Neo4j 进行知识图谱存储
+    1. 监听 memory.sleep 事件触发知识图谱整理
+    2. 从 episodic_memory 数据库读取记忆
+    3. 批量调用 LLM 提取实体和关系
+    4. 存储到 Neo4j 知识图谱
     """
 
     def __init__(self, event_bus: EventBus):
@@ -23,36 +28,171 @@ class EntityExtractionMemory:
         self.llm_client = LLMClient()
         self.enabled = settings.ENABLE_NEO4J
         self.graph_memory = None
+        self.conn = None
 
         if self.enabled:
             self.graph_memory = Neo4jGraphMemory(event_bus)
+            self._ensure_connection()
             self._subscribe_events()
+
+    def _ensure_connection(self):
+        """确保 PostgreSQL 连接"""
+        try:
+            if self.conn is None or self.conn.closed:
+                self.conn = psycopg2.connect(
+                    dbname=settings.PG_DB,
+                    user=settings.PG_USER,
+                    password=settings.PG_PASSWORD,
+                    host=settings.PG_HOST,
+                    port=settings.PG_PORT,
+                    connect_timeout=5,
+                )
+                register_vector(self.conn)
+                logger.debug("EntityExtractionMemory connected to PostgreSQL.")
+        except Exception as e:
+            logger.error(f"PostgreSQL connection failed: {e}")
+            self.conn = None
 
     def _subscribe_events(self):
         """订阅相关事件"""
-        self.event_bus.subscribe("sense_summary", self._on_sense_summary)
+        self.event_bus.subscribe("memory.sleep", self._on_memory_sleep)
 
-    async def _on_sense_summary(self, event: Event):
-        """处理感官摘要事件"""
-        summaries = event.data.get("summaries", "")
-        if summaries:
-            await self.extract_and_store(summaries)
+    def _on_memory_sleep(self, event: Event):
+        """处理记忆休眠事件 - 触发知识图谱整理"""
+        logger.info("收到 memory.sleep 事件，开始知识图谱整理...")
+        # 在后台线程中执行，避免阻塞事件总线
+        import threading
 
-    async def extract_and_store(self, summaries: str) -> dict:
+        threading.Thread(target=self.consolidate_all_memories, daemon=True).start()
+
+    def consolidate_all_memories(self) -> dict:
+        """整理全部记忆 - 从 episodic_memory 读取并批量处理
+
+        Returns:
+            整理结果统计 {"batches": int, "nodes": int, "edges": int}
+        """
+        if not self.enabled or not self.graph_memory:
+            logger.warning("Neo4j 未启用，跳过知识图谱整理")
+            return {"batches": 0, "nodes": 0, "edges": 0}
+
+        self._ensure_connection()
+        if not self.conn:
+            logger.error("无法连接 PostgreSQL，跳过整理")
+            return {"batches": 0, "nodes": 0, "edges": 0}
+
+        try:
+            # 1. 从 episodic_memory 读取所有记忆
+            memories = self._fetch_all_memories()
+            if not memories:
+                logger.info("没有记忆需要整理")
+                return {"batches": 0, "nodes": 0, "edges": 0}
+
+            logger.info(f"共读取 {len(memories)} 条记忆，开始批量整理...")
+
+            # 2. 分批处理
+            total_nodes = 0
+            total_edges = 0
+            batch_count = 0
+
+            for i in range(0, len(memories), BATCH_SIZE):
+                batch = memories[i : i + BATCH_SIZE]
+                batch_count += 1
+
+                # 构建摘要文本
+                summaries = self._build_summaries(batch)
+
+                # 调用 LLM 提取（同步）
+                result = self._extract_and_store(summaries)
+                total_nodes += result["nodes"]
+                total_edges += result["edges"]
+
+                logger.info(
+                    f"批次 {batch_count} 完成: {result['nodes']} 节点, {result['edges']} 边"
+                )
+
+            logger.info(
+                f"知识图谱整理完成: {batch_count} 批次, {total_nodes} 节点, {total_edges} 边"
+            )
+
+            # 3. 发布完成事件
+            self.event_bus.publish(
+                Event(
+                    name="graph_consolidated",
+                    data={
+                        "batches": batch_count,
+                        "nodes": total_nodes,
+                        "edges": total_edges,
+                    },
+                )
+            )
+
+            return {"batches": batch_count, "nodes": total_nodes, "edges": total_edges}
+
+        except Exception as e:
+            logger.error(f"知识图谱整理失败: {e}")
+            return {"batches": 0, "nodes": 0, "edges": 0}
+
+    def _fetch_all_memories(self) -> list:
+        """从 episodic_memory 读取未整理的记忆（is_consolidated=0，按时间从早到晚排序）"""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, content, insight, importance, time, metadata
+                    FROM episodic_memory
+                    WHERE is_consolidated = 0
+                    ORDER BY time ASC
+                    """
+                )
+                rows = cur.fetchall()
+
+                memories = []
+                for row in rows:
+                    memories.append(
+                        {
+                            "id": row[0],
+                            "content": row[1],
+                            "insight": row[2],
+                            "importance": row[3],
+                            "time": (
+                                row[4].isoformat()
+                                if hasattr(row[4], "isoformat")
+                                else str(row[4])
+                            ),
+                            "metadata": row[5],
+                        }
+                    )
+                return memories
+        except Exception as e:
+            logger.error(f"读取记忆失败: {e}")
+            if self.conn:
+                self.conn.rollback()
+            return []
+
+    def _build_summaries(self, memories: list) -> str:
+        """将记忆列表构建为摘要文本"""
+        summaries = []
+        for i, m in enumerate(memories, 1):
+            summary = f"[{i}] 时间: {m['time']}\n内容: {m['content']}"
+            if m.get("insight"):
+                summary += f"\n感想: {m['insight']}"
+            if m.get("metadata").get("keywords"):
+                summary += f"\n关键词: {json.dumps(m['metadata'], ensure_ascii=False)}"
+            summaries.append(summary)
+        return "\n\n".join(summaries)
+
+    def _extract_and_store(self, summaries: str) -> dict:
         """从摘要中提取实体和关系并存储到 Neo4j
 
         Args:
-            summaries: 感官摘要文本
+            summaries: 记忆摘要文本
 
         Returns:
             提取结果统计 {"nodes": int, "edges": int}
         """
-        if not self.enabled or not self.graph_memory:
-            return {"nodes": 0, "edges": 0}
-
         try:
             # 1. 调用 LLM 提取实体和关系
-            extraction_result = await self._llm_extract(summaries)
+            extraction_result = self._llm_extract(summaries)
 
             if not extraction_result:
                 return {"nodes": 0, "edges": 0}
@@ -74,31 +214,34 @@ class EntityExtractionMemory:
                     if success:
                         edge_count += 1
 
-            logger.info(f"实体提取完成: {node_count} 节点, {edge_count} 边")
-
-            # 3. 发布完成事件
-            self.event_bus.publish(
-                Event(
-                    type="graph_consolidated",
-                    data={"nodes": node_count, "edges": edge_count},
-                )
-            )
-
             return {"nodes": node_count, "edges": edge_count}
 
         except Exception as e:
             logger.error(f"实体提取失败: {e}")
             return {"nodes": 0, "edges": 0}
 
-    async def _llm_extract(self, summaries: str) -> list:
-        """调用 LLM 提取实体和关系"""
-        from config.prompts import prompts
+    def _llm_extract(self, summaries: str) -> list:
+        """调用 LLM 提取实体和关系
 
-        prompt = prompts.get("graph_consolidation_prompt", "")
-        formatted_prompt = prompt.replace("{{summaries}}", summaries)
+        使用 system_prompt + graph_consolidation_prompt 作为提示词
+        """
+        system_prompt = settings.SYSTEM_PROMPT
+        graph_prompt = settings.GRAPH_CONSOLIDATION_PROMPT
+
+        # 替换变量
+        formatted_graph_prompt = graph_prompt.replace("{{summaries}}", summaries)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": formatted_graph_prompt},
+        ]
 
         try:
-            response = await self.llm_client.chat(formatted_prompt)
+            response = self.llm_client.one_chat(settings.LARGE_LLM, messages)
+            if response is None:
+                logger.error("LLM 返回空响应")
+                return []
+
             # 清理响应，移除可能的 markdown 标记
             cleaned = self._clean_json_response(response)
             result = json.loads(cleaned)
@@ -109,6 +252,7 @@ class EntityExtractionMemory:
 
         except json.JSONDecodeError as e:
             logger.error(f"JSON 解析失败: {e}")
+            logger.debug(f"原始响应: {response}")
             return []
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")

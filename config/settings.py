@@ -69,6 +69,7 @@ class Settings:
     CORE_PERSONA = PROMPTS.get("core_persona", "")
     SYSTEM_PROMPT = CORE_PERSONA + PROMPTS.get("system_prompt", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
+    GRAPH_CONSOLIDATION_PROMPT = PROMPTS.get("graph_consolidation_prompt", "")
 
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
     STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30"))

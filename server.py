@@ -16,6 +16,7 @@ from config.settings import settings
 from memory.episodic_memory import EpisodicMemory
 from memory.memory_process import Hippocampus
 from memory.db_memory import DBMemory
+from memory.entity_extraction import EntityExtractionMemory
 from config.logging_config import get_logger
 
 # Configure logging
@@ -60,9 +61,9 @@ class EmberServer:
         self.event_bus = EventBus()
         self.manager = ConnectionManager()
         self.loop = None
-        self.current_ai_msg_id = None # Track ongoing AI message ID
-        self.current_full_text = "" # Track full text for TTS
-        
+        self.current_ai_msg_id = None  # Track ongoing AI message ID
+        self.current_full_text = ""  # Track full text for TTS
+
         # Initialize components
         self.heartbeat = Heartbeat(self.event_bus, interval=settings.HEARTBEAT_INTERVAL)
         self.memory = ShortTermMemory(
@@ -73,7 +74,10 @@ class EmberServer:
         self.hippocampus = Hippocampus(self.event_bus)
         self.db_memory = DBMemory(self.event_bus)
         self.state_manager = StateManager(self.event_bus, self.hippocampus, self.memory)
-        self.brain = Brain(self.event_bus, self.state_manager, self.memory, self.hippocampus)
+        self.entity_memory = EntityExtractionMemory(self.event_bus)
+        self.brain = Brain(
+            self.event_bus, self.state_manager, self.memory, self.hippocampus
+        )
         self.tts_manager = TTSManager(voice="zh-CN-XiaoxiaoNeural")
 
         self._setup_middleware()
@@ -125,14 +129,14 @@ class EmberServer:
                     data = await websocket.receive_text()
                     message = json.loads(data)
                     msg_type = message.get("type")
-                    
+
                     # 严格拦截 TTS 请求，防止进入消息广播逻辑
                     if msg_type == "tts_request":
                         text = message.get("content")
                         if text:
                             logger.info(f"收到手动 TTS 请求: {text[:20]}...")
                             asyncio.create_task(self._process_tts(text))
-                        continue # 必须 continue，跳过下方的 user_input 处理
+                        continue  # 必须 continue，跳过下方的 user_input 处理
 
                     user_input = message.get("content")
                     if user_input:
@@ -159,55 +163,63 @@ class EmberServer:
         self.event_bus.subscribe("llm.started", self._on_ai_start_internal)
         self.event_bus.subscribe("llm.chunk", self._on_ai_chunk_internal)
         self.event_bus.subscribe("llm.finished", self._on_ai_finished_internal)
-        self.event_bus.subscribe("state.update", lambda e: self.safe_broadcast({
-            "type": "state_update", "state": e.data.get("new_state", {})
-        }))
+        self.event_bus.subscribe(
+            "state.update",
+            lambda e: self.safe_broadcast(
+                {"type": "state_update", "state": e.data.get("new_state", {})}
+            ),
+        )
 
     def _on_ai_start_internal(self, event):
         self.current_ai_msg_id = int(self.event_bus.logical_now * 1000)
         self.current_full_text = ""
-        self.safe_broadcast({
-            "type": "message", 
-            "sender": "ai", 
-            "content": "", 
-            "mode": "start", 
-            "timestamp": self.current_ai_msg_id,
-            "id": self.current_ai_msg_id
-        })
+        self.safe_broadcast(
+            {
+                "type": "message",
+                "sender": "ai",
+                "content": "",
+                "mode": "start",
+                "timestamp": self.current_ai_msg_id,
+                "id": self.current_ai_msg_id,
+            }
+        )
 
     def _on_ai_chunk_internal(self, event):
         if self.current_ai_msg_id:
             chunk = event.data.get("text", "")
             self.current_full_text += chunk
-            self.safe_broadcast({
-                "type": "message", 
-                "sender": "ai", 
-                "content": chunk, 
-                "mode": "append",
-                "id": self.current_ai_msg_id
-            })
+            self.safe_broadcast(
+                {
+                    "type": "message",
+                    "sender": "ai",
+                    "content": chunk,
+                    "mode": "append",
+                    "id": self.current_ai_msg_id,
+                }
+            )
 
     def _on_ai_finished_internal(self, event):
-        logger.info(f"LLM 完成输出，准备合成 TTS... (内容长度: {len(self.current_full_text)})")
+        logger.info(
+            f"LLM 完成输出，准备合成 TTS... (内容长度: {len(self.current_full_text)})"
+        )
         if self.current_full_text and self.current_full_text.strip():
             # 只有开启了某种自动逻辑或当前处于 AI 回复流中才自动合成
             if self.loop:
                 self.loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(self._process_tts(self.current_full_text))
+                    lambda: asyncio.create_task(
+                        self._process_tts(self.current_full_text)
+                    )
                 )
-        
-        self.safe_broadcast({
-            "type": "llm.done"
-        })
+
+        self.safe_broadcast({"type": "llm.done"})
 
     async def _process_tts(self, text):
         try:
             base64_audio = await self.tts_manager.generate_base64(text)
             logger.info(f"广播 Base64 TTS 音频 (长度: {len(base64_audio)})")
-            await self.manager.broadcast({
-                "type": "audio",
-                "audio_base64": base64_audio
-            })
+            await self.manager.broadcast(
+                {"type": "audio", "audio_base64": base64_audio}
+            )
         except Exception as e:
             logger.error(f"TTS 广播错误: {e}")
 

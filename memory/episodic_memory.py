@@ -73,8 +73,23 @@ class EpisodicMemory:
                         access_count INTEGER DEFAULT 0,
                         last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         metadata JSONB,
-                        time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        is_consolidated INTEGER DEFAULT 0
                     )
+                    """
+                )
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'episodic_memory'
+                            AND column_name = 'is_consolidated'
+                        ) THEN
+                            ALTER TABLE episodic_memory ADD COLUMN is_consolidated INTEGER DEFAULT 0;
+                        END IF;
+                    END $$;
                     """
                 )
                 self.conn.commit()
