@@ -28,26 +28,32 @@ class LLMClient:
         data = json.loads(good_json_string)
         return data
 
-    def one_chat(self, model_config, messages):
+    def one_chat(self, model_config, messages, timeout=30):
+        """单次对话，带超时和重试"""
         client = (
             self.large_client
             if model_config == settings.LARGE_LLM
             else self.small_client
         )
 
-        try:
-            response = client.chat.completions.create(
-                model=model_config.name,
-                messages=messages,
-                extra_body={"enable_thinking": False},
-                stream=False,
-                temperature=0.7,
-            )
-            full_response = response.choices[0].message.content
-            return full_response
-        except Exception as e:
-            logger.error(f"OneChat Error: {e}")
-            return None
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=model_config.name,
+                    messages=messages,
+                    extra_body={"enable_thinking": False},
+                    stream=False,
+                    temperature=0.7,
+                    timeout=timeout,
+                )
+                full_response = response.choices[0].message.content
+                return full_response
+            except Exception as e:
+                logger.error(f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt == max_retries - 1:
+                    return None
+        return None
 
     def stream_chat(self, model_config, messages):
         client = (

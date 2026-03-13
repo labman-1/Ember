@@ -67,6 +67,15 @@ class Neo4jGraphMemory:
     def _safe_label(self, label: str):
         return re.sub(r"[^a-zA-Z0-9_]", "", label)
 
+    def _sanitize_relation(self, relation: str) -> str:
+        """净化关系类型，只允许中文、英文、数字和下划线"""
+        if not relation or not isinstance(relation, str):
+            return ""
+        # 保留中文、英文、数字、下划线和空格（空格转为下划线）
+        sanitized = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9_\s]', '', relation)
+        sanitized = sanitized.strip().replace(' ', '_')
+        return sanitized if sanitized else ""
+
     def upsert_entity_with_mode(
         self, entity_type: str, properties: dict, is_increment: bool = True
     ):
@@ -202,10 +211,16 @@ class Neo4jGraphMemory:
         props = properties or {}
 
         def _rel_tx(tx):
+            # 净化关系类型，防止注入
+            safe_relation = self._sanitize_relation(relation)
+            if not safe_relation:
+                logger.warning(f"关系类型无效: {relation}")
+                return None
+
             # 使用反引号包裹关系类型，支持中文
             query = f"""
             MATCH (a:Entity {{name: $source}}), (b:Entity {{name: $target}})
-            MERGE (a)-[r:`{relation}`]->(b)
+            MERGE (a)-[r:`{safe_relation}`]->(b)
             SET r += $props
             RETURN elementId(r) AS rid
             """

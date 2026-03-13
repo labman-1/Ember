@@ -13,19 +13,37 @@ class TTSManager:
         self.output_dir = "data/audio"
         os.makedirs(self.output_dir, exist_ok=True)
 
-    async def generate_base64(self, text: str):
-        """合成语音并返回 Base64 编码"""
-        # 移除 <thought> 标签内容（使用增强的容错处理）
+    async def generate_base64(self, text: str, timeout: float = 30.0):
+        """合成语音并返回 Base64 编码，带超时保护"""
         import base64
-        clean_text = remove_thought_content(text)
-        
+        import asyncio
+
+        try:
+            # 移除 <thought> 标签内容
+            clean_text = remove_thought_content(text)
+
+            # 使用 asyncio.wait_for 包装 TTS 操作
+            audio_data = await asyncio.wait_for(
+                self._do_tts(clean_text),
+                timeout=timeout
+            )
+
+            return base64.b64encode(audio_data).decode('utf-8')
+        except asyncio.TimeoutError:
+            logger.error(f"TTS 合成超时 (>{timeout}s)")
+            return None
+        except Exception as e:
+            logger.error(f"TTS 合成失败: {e}")
+            return None
+
+    async def _do_tts(self, clean_text: str):
+        """执行实际的 TTS 合成"""
         communicate = edge_tts.Communicate(clean_text, self.voice)
         audio_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_data += chunk["data"]
-        
-        return base64.b64encode(audio_data).decode('utf-8')
+        return audio_data
 
     def cleanup(self, filename):
         """清理旧的语音文件"""

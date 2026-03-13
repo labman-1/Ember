@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class Hippocampus:
+    _file_lock = threading.Lock()
+
     def __init__(self, event_bus: EventBus):
         self.event_bus = event_bus
         self.event_bus.subscribe("memory.preprocess", self._on_preprocess_request)
@@ -24,11 +26,12 @@ class Hippocampus:
 
     def _load_experience(self):
         try:
-            with open("./config/chat_history.log", "r", encoding="utf-8") as f:
-                content = f.read()
-            with open("./config/chat_history.log", "w", encoding="utf-8") as f:
-                f.write("")
-            return content
+            with self._file_lock:
+                with open("./config/chat_history.log", "r", encoding="utf-8") as f:
+                    content = f.read()
+                with open("./config/chat_history.log", "w", encoding="utf-8") as f:
+                    f.write("")
+                return content
 
         except FileNotFoundError:
             logger.warning("chat_history.log not found")
@@ -78,15 +81,22 @@ class Hippocampus:
             {"role": "user", "content": user_prompt},
         ]
         resp = self.llm_client.one_chat(settings.SMALL_LLM, messages=messages)
+
+        # 检查 LLM 响应是否为空
+        if resp is None:
+            logger.error("LLM returned no response during memory loading (resp is None)")
+            return []
+
         key_words = []
         query = ""
         entities = []
-        memories = None
+
         resp_json = self.llm_client._extract_json(resp)
         if resp_json is None:
-            raise json.JSONDecodeError("Failed to extract JSON", resp, 0)
+            logger.error(f"Failed to extract JSON from LLM response: {repr(resp)}")
+            return []
 
-        if resp_json["need_memory"] is False:
+        if resp_json.get("need_memory", False) is False:
             logger.info("LLM judged that no memory retrieval is needed.")
             return []
         try:
@@ -128,6 +138,8 @@ class Hippocampus:
                     f"Graph entities: {[e.get('name') for e in graph_context['entities']]}"
                 )
 
+            return memories
+
         except concurrent.futures.TimeoutError:
             logger.error("检索超时，跳过查询以维持对话。")
             return []
@@ -136,8 +148,6 @@ class Hippocampus:
                 f"Failed to decode LLM response during memory loading: {e}. Raw response: {repr(resp)}"
             )
             return []
-        finally:
-            return memories
 
     def _get_graph_memory(self, entities: list) -> dict:
         """从 Neo4j 图谱中检索实体及关系"""
