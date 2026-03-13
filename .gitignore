@@ -5,7 +5,7 @@
 arrangement.txt
 
 # =========================
-# Python & �������
+# Python & 虚拟环境
 # =========================
 __pycache__/
 *.py[cod]
@@ -19,7 +19,7 @@ venv/
 env/
 ENV/
 
-# �������������ɵ�Ŀ¼
+# 构建生成的目录
 *.egg-info/
 .installed.cfg
 *.egg
@@ -27,7 +27,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # =========================
-# 项目违行时产生的数杮 & 数杮库
+# 项目运行时产生的数据 & 数据库
 # =========================
 data/logs/
 data/cache/
@@ -40,14 +40,14 @@ data/vector_store/
 chroma_db/
 
 # =========================
-# 酝置文件中的记录/缓存
+# 配置文件中的记录/缓存
 # =========================
 config/chat_history.log
 config/chat_memory.json
 config/state.json
 
 # =========================
-# IDE & 擝作系统酝置
+# IDE & 操作系统配置
 # =========================
 .vscode/
 .idea/

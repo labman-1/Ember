@@ -102,8 +102,15 @@ class EpisodicMemory:
         self.store_queue.put({"type": "store", "data": event.data})
 
     def _worker_loop(self):
+        """工作线程循环，支持优雅退出"""
         while True:
-            task = self.store_queue.get()
+            try:
+                # 使用 timeout 支持中断
+                task = self.store_queue.get(timeout=1.0)
+            except:
+                # 超时检查是否应该退出
+                continue
+
             if task is None:
                 break
 
@@ -115,7 +122,10 @@ class EpisodicMemory:
             except Exception as e:
                 logger.error(f"Error in EpisodicMemory worker loop: {e}")
             finally:
-                self.store_queue.task_done()
+                try:
+                    self.store_queue.task_done()
+                except:
+                    pass
 
     def _async_store_process(self, event_data):
         content = event_data.get("content", "")

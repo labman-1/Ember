@@ -4,16 +4,17 @@ import logging
 from brain.llm_client import LLMClient
 from config.settings import settings
 from core.event_bus import EventBus, Event
-from config.settings import settings
 from memory.memory_process import Hippocampus
 from memory.short_term import ShortTermMemory
 import random
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
 
 class StateManager:
+    # 类级别线程池
+    _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="state_mgr")
 
     def __init__(
         self,
@@ -30,11 +31,22 @@ class StateManager:
         self.last_interaction_logical_time = self.event_bus.logical_now
 
         self.current_state = settings.STATE
-        self.is_thinking = False
+        self._thinking_lock = threading.Lock()  # 保护 is_thinking
+        self._thinking = False
         self.is_sleeping = False
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
         self.event_bus.subscribe("system.tick", self._on_tick)
+
+    @property
+    def is_thinking(self):
+        with self._thinking_lock:
+            return self._thinking
+
+    @is_thinking.setter
+    def is_thinking(self, value):
+        with self._thinking_lock:
+            self._thinking = value
 
     def _get_logical_now(self):
         return self.event_bus.logical_now
@@ -93,10 +105,13 @@ class StateManager:
 
     def _async_log(self, filename, content):
         def _log():
-            with open(filename, "a", encoding="utf-8", buffering=1) as f:
-                f.write(content + "\n")
+            try:
+                with open(filename, "a", encoding="utf-8", buffering=1) as f:
+                    f.write(content + "\n")
+            except Exception as e:
+                logger.error(f"Error writing log: {e}")
 
-        threading.Thread(target=_log, daemon=True).start()
+        self._executor.submit(_log)
 
     def _update_state(self, new_state, logical_now=None):
         data = new_state.copy()
@@ -108,9 +123,18 @@ class StateManager:
 
         self.event_bus.publish(Event("state.update", data={"new_state": new_state}))
 
-        with open("./config/state.json", "w", encoding="utf-8") as f:
-            json.dump(new_state, f, ensure_ascii=False, indent=2)
-        self.current_state.update(new_state)
+        # 使用锁保护文件写入，防止竞争条件
+        if not hasattr(self, '_state_lock'):
+            import threading
+            self._state_lock = threading.Lock()
+
+        with self._state_lock:
+            try:
+                with open("./config/state.json", "w", encoding="utf-8") as f:
+                    json.dump(new_state, f, ensure_ascii=False, indent=2)
+                self.current_state.update(new_state)
+            except Exception as e:
+                logger.error(f"状态文件写入失败: {e}")
 
     def _on_tick(self, event: Event):
         if self.is_thinking:

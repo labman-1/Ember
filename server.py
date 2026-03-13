@@ -63,6 +63,7 @@ class EmberServer:
         self.loop = None
         self.current_ai_msg_id = None  # Track ongoing AI message ID
         self.current_full_text = ""  # Track full text for TTS
+        self._tts_semaphore = asyncio.Semaphore(3)  # 限制并发 TTS 数量为 3
 
         # Initialize components
         self.heartbeat = Heartbeat(self.event_bus, interval=settings.HEARTBEAT_INTERVAL)
@@ -87,7 +88,7 @@ class EmberServer:
     def _setup_middleware(self):
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -124,11 +125,34 @@ class EmberServer:
         @self.app.websocket("/ws/chat")
         async def websocket_endpoint(websocket: WebSocket):
             await self.manager.connect(websocket)
+            last_ping = time.time()
+            ping_interval = 30  # 30秒发送一次心跳
+
             try:
                 while True:
-                    data = await websocket.receive_text()
+                    # 检查是否需要发送心跳
+                    if time.time() - last_ping > ping_interval:
+                        try:
+                            await websocket.send_text(json.dumps({"type": "ping"}))
+                            last_ping = time.time()
+                        except Exception:
+                            break  # 发送失败，连接已断开
+
+                    # 使用超时接收，避免阻塞
+                    try:
+                        data = await asyncio.wait_for(
+                            websocket.receive_text(),
+                            timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        continue  # 超时继续循环，检查心跳
+
                     message = json.loads(data)
                     msg_type = message.get("type")
+
+                    # 处理心跳 pong
+                    if msg_type == "pong":
+                        continue
 
                     # 严格拦截 TTS 请求，防止进入消息广播逻辑
                     if msg_type == "tts_request":
@@ -157,6 +181,9 @@ class EmberServer:
                 self.manager.disconnect(websocket)
             except Exception as e:
                 logger.error(f"WS loop exception: {e}")
+                self.manager.disconnect(websocket)
+            finally:
+                # 确保连接被移除
                 self.manager.disconnect(websocket)
 
     def _setup_event_handlers(self):
@@ -214,20 +241,41 @@ class EmberServer:
         self.safe_broadcast({"type": "llm.done"})
 
     async def _process_tts(self, text):
-        try:
-            base64_audio = await self.tts_manager.generate_base64(text)
-            logger.info(f"广播 Base64 TTS 音频 (长度: {len(base64_audio)})")
-            await self.manager.broadcast(
-                {"type": "audio", "audio_base64": base64_audio}
-            )
-        except Exception as e:
-            logger.error(f"TTS 广播错误: {e}")
+        """处理 TTS，限制并发数量"""
+        if not text or not text.strip():
+            return
+
+        # 使用信号量限制并发
+        async with self._tts_semaphore:
+            try:
+                # 限制文本长度，防止超长文本导致性能问题
+                max_tts_length = 500
+                if len(text) > max_tts_length:
+                    text = text[:max_tts_length] + "..."
+                    logger.warning(f"TTS 文本过长，已截断至 {max_tts_length} 字符")
+
+                base64_audio = await self.tts_manager.generate_base64(text)
+                logger.info(f"广播 Base64 TTS 音频 (长度: {len(base64_audio)})")
+                await self.manager.broadcast(
+                    {"type": "audio", "audio_base64": base64_audio}
+                )
+            except Exception as e:
+                logger.error(f"TTS 广播错误: {e}")
 
     def safe_broadcast(self, message: dict):
+        """线程安全的广播方法"""
         if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(self.manager.broadcast(message))
-            )
+            try:
+                # 使用 call_soon_threadsafe 安排协程创建
+                def create_task():
+                    try:
+                        asyncio.create_task(self.manager.broadcast(message))
+                    except Exception as e:
+                        logger.error(f"创建广播任务失败: {e}")
+
+                self.loop.call_soon_threadsafe(create_task)
+            except Exception as e:
+                logger.error(f"safe_broadcast 失败: {e}")
 
     def start(self):
         self.heartbeat.start()

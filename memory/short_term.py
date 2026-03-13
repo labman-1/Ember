@@ -2,6 +2,7 @@ import json
 import threading
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from brain.tag_utils import extract_thought_and_speech
 
 
@@ -15,6 +16,9 @@ def separate_thought_and_speech(text):
 
 
 class ShortTermMemory:
+    # 类级别线程池，所有实例共享
+    _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="short_term")
+
     def __init__(self, max_memory_size=20, base_prompt=None, state="initial"):
         self.max_memory_size = max_memory_size
         self.memory = []
@@ -47,17 +51,23 @@ class ShortTermMemory:
 
     def async_log(self, filename, content):
         def _log():
-            with open(filename, "a", encoding="utf-8", buffering=1) as f:
-                f.write(content + "\n")
+            try:
+                with open(filename, "a", encoding="utf-8", buffering=1) as f:
+                    f.write(content + "\n")
+            except Exception as e:
+                print(f"Error writing log: {e}")
 
-        threading.Thread(target=_log, daemon=True).start()
+        self._executor.submit(_log)
 
     def _async_log_clear(self, filename):
         def _log():
-            with open(filename, "w", encoding="utf-8", buffering=1) as f:
-                f.write("")
+            try:
+                with open(filename, "w", encoding="utf-8", buffering=1) as f:
+                    f.write("")
+            except Exception as e:
+                print(f"Error clearing log: {e}")
 
-        threading.Thread(target=_log, daemon=True).start()
+        self._executor.submit(_log)
 
     def add_message(self, role, content):
         # content = separate_thought_and_speech(content)[1]
@@ -73,7 +83,7 @@ class ShortTermMemory:
             except Exception as e:
                 print(f"Error saving memory: {e}")
 
-        threading.Thread(target=_save, daemon=True).start()
+        self._executor.submit(_save)
 
     def update_base_prompt(self, new_base_prompt):
         self.base_prompt = new_base_prompt
@@ -85,7 +95,9 @@ class ShortTermMemory:
         ] + self.memory
 
     def get_memory(self):
-        return {"history": self.memory}
+        """返回内存的副本，防止外部修改"""
+        import copy
+        return {"history": copy.deepcopy(self.memory)}
 
     def clear_memory(self):
         self.memory = []

@@ -52,7 +52,11 @@ class DBMemory:
 
     def _init_db(self):
         self._ensure_connection()
-        with self.conn.cursor() as cur:
+        if not self.conn:
+            logger.error("Cannot initialize DB: connection failed")
+            return
+        try:
+            with self.conn.cursor() as cur:
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS message_list (
