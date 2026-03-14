@@ -120,7 +120,7 @@ class Hippocampus:
             simplified_memories = self._simplify_memories(raw_memories)
 
             # 获取图谱查询结果
-            graph_context = future_graph.result(timeout=5)
+            graph_context = self._simplify_graph(future_graph.result(timeout=5))
 
             # 整合结果
             result = {
@@ -167,14 +167,27 @@ class Hippocampus:
     def _simplify_memories(self, memories):
         simplified = []
         for mem in memories:
+            content = mem.get("content", "")
+            insight = mem.get("insight", "")
             simplified.append(
                 {
-                    "content": mem.get("content", ""),
-                    "insight": mem.get("insight", ""),
+                    "content": content[:200] if len(content) > 200 else content,
+                    "insight": insight[:100] if len(insight) > 100 else insight,
                     "time": mem.get("time", ""),
                 }
             )
         return simplified
+
+    def _simplify_graph(self, graph_context: dict) -> dict:
+        """截断图谱实体的 bio 字段，减少 token 占用"""
+        entities = []
+        for e in graph_context.get("entities", []):
+            entry = dict(e)
+            bio = entry.get("bio", "")
+            if len(bio) > 80:
+                entry["bio"] = bio[:80]
+            entities.append(entry)
+        return {"entities": entities, "relations": graph_context.get("relations", [])}
 
     def _get_persistence_memory(self, query_data):
         future = concurrent.futures.Future()
