@@ -125,7 +125,7 @@ class StateManager:
         self.event_bus.publish(Event("state.update", data={"new_state": new_state}))
 
         # 使用锁保护文件写入，防止竞争条件
-        if not hasattr(self, '_state_lock'):
+        if not hasattr(self, "_state_lock"):
             self._state_lock = threading.Lock()
 
         with self._state_lock:
