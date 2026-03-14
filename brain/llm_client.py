@@ -88,6 +88,10 @@ class LLMClient:
                     token_details = getattr(usage, "prompt_tokens_details", None)
                     if token_details:
                         cached_tokens = getattr(token_details, "cached_tokens", 0)
+                        try:
+                            cached_tokens = int(cached_tokens)
+                        except (TypeError, ValueError):
+                            cached_tokens = 0
                         if cached_tokens > 0:
                             logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
 
@@ -117,7 +121,6 @@ class LLMClient:
                 temperature=0.7,
             )
 
-            cached_tokens_logged = False
             for chunk in response:
                 reasoning = getattr(chunk.choices[0].delta, "reasoning_content", None)
                 if reasoning:
@@ -127,16 +130,18 @@ class LLMClient:
                 if content is not None:
                     yield content
 
-                # 在最后一个 chunk 中记录缓存命中情况
-                if not cached_tokens_logged:
-                    usage = getattr(chunk, "usage", None)
-                    if usage:
-                        token_details = getattr(usage, "prompt_tokens_details", None)
-                        if token_details:
-                            cached_tokens = getattr(token_details, "cached_tokens", 0)
-                            if cached_tokens > 0:
-                                logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
-                            cached_tokens_logged = True
+            # 在流结束后记录缓存命中情况
+            usage = getattr(response, "usage", None)
+            if usage:
+                token_details = getattr(usage, "prompt_tokens_details", None)
+                if token_details:
+                    cached_tokens = getattr(token_details, "cached_tokens", 0)
+                    try:
+                        cached_tokens = int(cached_tokens)
+                    except (TypeError, ValueError):
+                        cached_tokens = 0
+                    if cached_tokens > 0:
+                        logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
 
         except Exception as e:
             yield f"[Error]: {str(e)}"
