@@ -4,6 +4,7 @@ import re
 import json
 from json_repair import repair_json
 from config.settings import settings
+from brain.context_cache import ContextCache
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,17 @@ class LLMClient:
             base_url=settings.EMBEDDING_MODEL.base_url,
         )
 
+        # 可选：DashScope Context Cache，将固定 system prompt 缓存以节省 token
+        self._cache: ContextCache | None = None
+        if settings.ENABLE_CONTEXT_CACHE:
+            self._cache = ContextCache(
+                api_key=settings.LARGE_LLM.api_key,
+                model=settings.LARGE_LLM.name,
+                system_prompt=settings.SYSTEM_PROMPT,
+            )
+            if not self._cache.enabled:
+                logger.warning("[Cache] Context cache 初始化失败，已降级为无缓存模式")
+
     def _extract_json(self, content):
         good_json_string = repair_json(content)
         data = json.loads(good_json_string)
@@ -36,13 +48,17 @@ class LLMClient:
             else self.small_client
         )
 
+        messages, cache_extra = (
+            self._cache.apply(messages) if self._cache else (messages, {})
+        )
+
         max_retries = 2
         for attempt in range(max_retries):
             try:
                 response = client.chat.completions.create(
                     model=model_config.name,
                     messages=messages,
-                    extra_body={"enable_thinking": False},
+                    extra_body={"enable_thinking": False, **cache_extra},
                     stream=False,
                     temperature=0.7,
                     timeout=timeout,
@@ -62,11 +78,15 @@ class LLMClient:
             else self.small_client
         )
 
+        messages, cache_extra = (
+            self._cache.apply(messages) if self._cache else (messages, {})
+        )
+
         try:
             response = client.chat.completions.create(
                 model=model_config.name,
                 messages=messages,
-                extra_body={"enable_thinking": False},
+                extra_body={"enable_thinking": False, **cache_extra},
                 stream=True,
                 temperature=0.7,
             )
