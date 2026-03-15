@@ -112,6 +112,7 @@ class EmberServer:
                 "display_name": settings.CHARACTER_NAME,
                 "state": self.state_manager.current_state,
                 "logical_time": self.event_bus.formatted_logical_now,
+                "is_thinking": self.state_manager.is_thinking,
             }
 
         @self.app.get("/history")
@@ -141,8 +142,7 @@ class EmberServer:
                     # 使用超时接收，避免阻塞
                     try:
                         data = await asyncio.wait_for(
-                            websocket.receive_text(),
-                            timeout=5.0
+                            websocket.receive_text(), timeout=5.0
                         )
                     except asyncio.TimeoutError:
                         continue  # 超时继续循环，检查心跳

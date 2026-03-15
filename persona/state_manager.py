@@ -155,7 +155,7 @@ class StateManager:
         self.state_update_timeout = settings.STATE_IDLE_MIN_TIMEOUT
         self.is_thinking = True
         # 只取最后6条对话历史，减少 token 消耗
-        history = event.data.get("history", [])[-6:]
+        history = event.data.get("history", [])
         logical_now = self._get_logical_now()
         logical_now_str = self._format_logical_time(logical_now)
         logger.info(f"[{logical_now_str}] 收到用户交互事件，准备更新状态...")
@@ -189,7 +189,7 @@ class StateManager:
         info = self._get_idle_info(logical_now)
 
         # 只取最后6条对话历史，减少 token 消耗
-        history = self.short_term_memory.get_memory().get("history", [])[-6:]
+        history = self.short_term_memory.get_memory().get("history", [])
 
         context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
 

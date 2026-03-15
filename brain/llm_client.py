@@ -23,9 +23,16 @@ class LLMClient:
         )
 
     def _extract_json(self, content):
-        good_json_string = repair_json(content)
-        data = json.loads(good_json_string)
-        return data
+        if not content or not content.strip():
+            logger.warning("LLM 返回空内容，无法解析 JSON")
+            return None
+        try:
+            good_json_string = repair_json(content)
+            data = json.loads(good_json_string)
+            return data
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"JSON 解析失败: {e}, 原始内容: {content[:200] if content else 'None'}...")
+            return None
 
     def _log_usage(self, usage, model_name: str):
         """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息"""
