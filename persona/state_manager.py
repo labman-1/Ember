@@ -207,7 +207,7 @@ class StateManager:
                 + user_content
             )
 
-        prompt = user_content
+        prompt = user_content + "\n\n" + settings.IDLE_STATE_UPDATE_PROMPT
 
         try:
             response = self._ask_llm(settings.CORE_PERSONA, prompt)
