@@ -28,6 +28,42 @@ class LLMClient:
         data = json.loads(good_json_string)
         return data
 
+    def _log_usage(self, usage, model_name: str):
+        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式"""
+        if usage is None:
+            return
+
+        # OpenAI 风格: prompt_tokens / completion_tokens
+        p = getattr(usage, "prompt_tokens", None)
+        c = getattr(usage, "completion_tokens", None)
+
+        # Gemini 风格: prompt_token_count / candidates_token_count
+        if p is None:
+            p = getattr(usage, "prompt_token_count", None)
+        if c is None:
+            c = getattr(usage, "candidates_token_count", None)
+
+        try:
+            p = int(p) if p is not None else 0
+            c = int(c) if c is not None else 0
+        except (TypeError, ValueError):
+            p, c = 0, 0
+
+        logger.info(
+            f"[LLM Usage] Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}"
+        )
+
+        # 顺带记录缓存命中情况（如有）
+        token_details = getattr(usage, "prompt_tokens_details", None)
+        if token_details:
+            cached_tokens = getattr(token_details, "cached_tokens", 0)
+            try:
+                cached_tokens = int(cached_tokens)
+            except (TypeError, ValueError):
+                cached_tokens = 0
+            if cached_tokens > 0:
+                logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
+
     def _apply_explicit_cache(self, messages: list[dict]) -> list[dict]:
         """
         对 system message 应用显式缓存。
@@ -82,18 +118,9 @@ class LLMClient:
                 )
                 full_response = response.choices[0].message.content
 
-                # 记录缓存命中情况
-                usage = getattr(response, "usage", None)
-                if usage:
-                    token_details = getattr(usage, "prompt_tokens_details", None)
-                    if token_details:
-                        cached_tokens = getattr(token_details, "cached_tokens", 0)
-                        try:
-                            cached_tokens = int(cached_tokens)
-                        except (TypeError, ValueError):
-                            cached_tokens = 0
-                        if cached_tokens > 0:
-                            logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
+                # 记录 Token 消耗（兼容 OpenAI / Gemini 格式）
+                usage = getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+                self._log_usage(usage, model_config.name)
 
                 return full_response
             except Exception as e:
@@ -121,7 +148,12 @@ class LLMClient:
                 temperature=0.7,
             )
 
+            last_usage = None
             for chunk in response:
+                # 从最后一个含 usage 的 chunk 记录（OpenAI stream_options 方式）
+                if getattr(chunk, "usage", None):
+                    last_usage = chunk.usage
+
                 reasoning = getattr(chunk.choices[0].delta, "reasoning_content", None)
                 if reasoning:
                     yield f"{reasoning}"
@@ -130,18 +162,10 @@ class LLMClient:
                 if content is not None:
                     yield content
 
-            # 在流结束后记录缓存命中情况
-            usage = getattr(response, "usage", None)
-            if usage:
-                token_details = getattr(usage, "prompt_tokens_details", None)
-                if token_details:
-                    cached_tokens = getattr(token_details, "cached_tokens", 0)
-                    try:
-                        cached_tokens = int(cached_tokens)
-                    except (TypeError, ValueError):
-                        cached_tokens = 0
-                    if cached_tokens > 0:
-                        logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
+            # 在流结束后记录 Token 消耗
+            # 优先级：chunk.usage > response.usage（DashScope）> response.usage_metadata（Gemini）
+            usage = last_usage or getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+            self._log_usage(usage, model_config.name)
 
         except Exception as e:
             yield f"[Error]: {str(e)}"
