@@ -197,7 +197,3 @@ graph_consolidation_prompt: |
     {"operation": "upsert_node", "type": "Person", "name": "依鸣", "properties": {"aliases": ["Yiming"], "occupation": ["学生"]}, "is_increment": true},
     {"operation": "upsert_edge", "source": "依鸣", "target": "南京大学", "relation": "就读", "properties": {"temporal_context": "长期"}, "is_increment": true}
   ]
-
-  # Task Data
-  请处理以下摘要，并按上述格式输出：
-  {{summaries}}

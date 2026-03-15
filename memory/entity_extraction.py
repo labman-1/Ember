@@ -233,11 +233,14 @@ class EntityExtractionMemory:
         graph_prompt = settings.GRAPH_CONSOLIDATION_PROMPT
 
         # 替换变量
-        formatted_graph_prompt = graph_prompt.replace("{{summaries}}", summaries)
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": formatted_graph_prompt},
+            {"role": "system", "content": graph_prompt},
+            {
+                "role": "user",
+                "content": f"请处理以下摘要，并按上述格式输出：\n\n{summaries}",
+            },
         ]
 
         try:
