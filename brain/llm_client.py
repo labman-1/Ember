@@ -31,7 +31,12 @@ class LLMClient:
     def _log_usage(self, usage, model_name: str):
         """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式"""
         if usage is None:
+            logger.debug("[LLM Usage] usage 为空")
             return
+
+        # 调试日志：输出 usage 对象的所有属性
+        usage_attrs = vars(usage) if hasattr(usage, '__dict__') else str(usage)
+        logger.debug(f"[LLM Usage Debug] usage 对象: {usage_attrs}")
 
         # OpenAI 风格: prompt_tokens / completion_tokens
         p = getattr(usage, "prompt_tokens", None)
@@ -56,6 +61,7 @@ class LLMClient:
         # 顺带记录缓存命中情况（如有）
         token_details = getattr(usage, "prompt_tokens_details", None)
         if token_details:
+            logger.debug(f"[LLM Usage Debug] prompt_tokens_details: {token_details}")
             cached_tokens = getattr(token_details, "cached_tokens", 0)
             try:
                 cached_tokens = int(cached_tokens)
@@ -63,6 +69,8 @@ class LLMClient:
                 cached_tokens = 0
             if cached_tokens > 0:
                 logger.info(f"[Cache] ✅ 缓存命中 {cached_tokens} token")
+        else:
+            logger.debug("[LLM Usage Debug] prompt_tokens_details 为空或不存在")
 
     def _apply_explicit_cache(self, messages: list[dict]) -> list[dict]:
         """
