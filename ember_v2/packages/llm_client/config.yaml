@@ -1,0 +1,30 @@
+# LLM Client Package 配置
+# 注意：环境变量优先级高于此文件
+
+models:
+  small:
+    name: ""  # 从 SMALL_LLM_MODEL 环境变量读取
+    api_key: ""  # 从 SMALL_LLM_API_KEY 环境变量读取
+    base_url: ""  # 从 SMALL_LLM_BASE_URL 环境变量读取
+    timeout: 30
+    max_retries: 3
+    temperature: 0.7
+
+  large:
+    name: ""  # 从 LARGE_LLM_MODEL 环境变量读取
+    api_key: ""  # 从 LARGE_LLM_API_KEY 环境变量读取
+    base_url: ""  # 从 LARGE_LLM_BASE_URL 环境变量读取
+    timeout: 60
+    max_retries: 3
+    temperature: 0.7
+
+  embedding:
+    name: ""  # 从 EMBEDDING_MODEL 环境变量读取
+    api_key: ""  # 从 EMBEDDING_API_KEY 环境变量读取
+    base_url: ""  # 从 EMBEDDING_BASE_URL 环境变量读取
+    timeout: 30
+    
+    # 本地模型配置
+    local:
+      enabled: false  # 设为 true 启用本地 embedding
+      model_name: "BAAI/bge-m3"  # BGE-M3 模型

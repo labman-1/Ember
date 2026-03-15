@@ -84,7 +84,9 @@ class Hippocampus:
 
         # 检查 LLM 响应是否为空
         if resp is None:
-            logger.error("LLM returned no response during memory loading (resp is None)")
+            logger.error(
+                "LLM returned no response during memory loading (resp is None)"
+            )
             return []
 
         key_words = []
