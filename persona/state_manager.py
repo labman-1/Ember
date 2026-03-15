@@ -179,7 +179,7 @@ class StateManager:
             logger.error(f"对话更新失败: {e}")
         finally:
             self.is_thinking = False
-            self.last_interaction_logical_time = logical_now
+            self.last_interaction_logical_time = self._get_logical_now()
 
     def _update_state_due_to_idle(self, logical_now):
         self.is_thinking = True
@@ -258,7 +258,7 @@ class StateManager:
             logger.error(f"闲置更新失败: {e}")
         finally:
             self.is_thinking = False
-            self.last_interaction_logical_time = logical_now
+            self.last_interaction_logical_time = self._get_logical_now()
 
     @property
     def prompt_injection(self):
