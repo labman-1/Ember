@@ -154,7 +154,8 @@ class StateManager:
 
         self.state_update_timeout = settings.STATE_IDLE_MIN_TIMEOUT
         self.is_thinking = True
-        history = event.data.get("history", [])
+        # 只取最后6条对话历史，减少 token 消耗
+        history = event.data.get("history", [])[-6:]
         logical_now = self._get_logical_now()
         logical_now_str = self._format_logical_time(logical_now)
         logger.info(f"[{logical_now_str}] 收到用户交互事件，准备更新状态...")
@@ -187,19 +188,26 @@ class StateManager:
 
         info = self._get_idle_info(logical_now)
 
-        history = self.short_term_memory.get_memory().get("history", [])
+        # 只取最后6条对话历史，减少 token 消耗
+        history = self.short_term_memory.get_memory().get("history", [])[-6:]
 
         context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
 
         memories = self.hippocampus.road_memory(context_for_memory)
 
-        prompt = self._apply_idle_template(settings.IDLE_STATE_UPDATE_PROMPT, info)
+        # 构建用户消息，将动态内容从 system prompt 移到 user message
+        user_content = f"""【环境变更推断任务】
+距离上次互动已经过去 {info['idle_duration']} 分钟，当前时间为 {info['current_time']}。
+历史状态：{info['old_state']}
+"""
 
         if memories:
-            prompt = (
+            user_content = (
                 f"[脑海闪现的记忆]:\n{memories}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n"
-                + prompt
+                + user_content
             )
+
+        prompt = user_content
 
         try:
             response = self._ask_llm(settings.CORE_PERSONA, prompt)
@@ -261,7 +269,10 @@ class StateManager:
     def speaking_prompt_injection(self):
         logical_now = self._get_logical_now()
         info = self._get_idle_info(logical_now)
-        prompt = self._apply_idle_template(settings.IDLE_SPEAKING_UPDATE_PROMPT, info)
+        # 将动态内容构建到用户消息中，保持 system prompt 静态
+        prompt = f"""距离上次互动已过去 {info['idle_duration']} 分钟，当前 {info['current_time']}。原状态为 {info['old_state']}。
+{settings.IDLE_SPEAKING_UPDATE_PROMPT}
+接下来提供之前的聊天记录供参考。"""
         return f"\n\n###你的任务###\n{prompt}\n\n"
 
     @property

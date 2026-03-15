@@ -40,9 +40,9 @@ class Brain:
     def _on_idle_speak(self, event: Event):
         def _speak():
             with self.lock:
-                dynamic_prompt = settings.SYSTEM_PROMPT
-                self.memory.update_base_prompt(dynamic_prompt)
-            self._llm_speak(self.memory, pack=True)
+                # 保持 System Prompt 静态
+                self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
+            self._llm_speak(self.memory, pack=True, memories="")
 
         thread = threading.Thread(target=_speak)
         thread.start()
@@ -66,18 +66,14 @@ class Brain:
             memories = (
                 json.dumps(road_result, ensure_ascii=False) if road_result else ""
             )
-            dynamic_prompt = settings.SYSTEM_PROMPT
-            if memories:
-                dynamic_prompt += f"\n\n[脑海闪现的记忆]：{memories}"
+            # 保持 System Prompt 静态，不再拼接动态内容
+            self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
 
-            self.memory.update_base_prompt(dynamic_prompt)
-
-            self._llm_speak(self.memory, pack=True)
+            self._llm_speak(self.memory, pack=True, memories=memories)
         finally:
             self._is_processing = False
 
-    def _llm_speak(self, memory, pack: bool = False):
-        """LLM 对话生成，带超时和错误处理"""
+    def _llm_speak(self, memory, pack: bool = False, memories: str = ""):
         import concurrent.futures
 
         # 在锁外准备数据，减少锁持有时间
@@ -95,12 +91,18 @@ class Brain:
                 )
                 formatted_history += f"{role_label}: {msg['content']}\n"
 
+            # 构建动态内容部分（放入 user message，保持 system 静态以提高缓存命中率）
+            dynamic_context = ""
+            if memories:
+                dynamic_context = f"\n\n[脑海闪现的记忆]：\n{memories}\n"
+
+            user_content = f"""以下是对话历史：
+{formatted_history}{self.state_manager.prompt_injection}{dynamic_context}
+现在的时间是{self.event_bus.formatted_logical_now}，请参考并结合状态生成你将要说的下一句话"""
+
             messages = [
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": f"以下是对话历史：\n{formatted_history}\n{self.state_manager.prompt_injection}\n\n现在的时间是{self.event_bus.formatted_logical_now}，请参考并结合状态生成你将要说的下一句话",
-                },
+                {"role": "user", "content": user_content},
             ]
         else:
             messages = data
