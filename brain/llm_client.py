@@ -1,6 +1,5 @@
 from openai import OpenAI
 import logging
-import re
 import json
 from json_repair import repair_json
 from config.settings import settings
@@ -28,6 +27,60 @@ class LLMClient:
         data = json.loads(good_json_string)
         return data
 
+    def _log_usage(self, usage, model_name: str):
+        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息"""
+        if usage is None:
+            logger.debug("[LLM Usage] usage 为空")
+            return
+
+        # 获取基础 token 数
+        p = getattr(usage, "prompt_tokens", None)
+        c = getattr(usage, "completion_tokens", None)
+
+        # Gemini 风格: prompt_token_count / candidates_token_count
+        if p is None:
+            p = getattr(usage, "prompt_token_count", None)
+        if c is None:
+            c = getattr(usage, "candidates_token_count", None)
+
+        try:
+            p = int(p) if p is not None else 0
+            c = int(c) if c is not None else 0
+        except (TypeError, ValueError):
+            p, c = 0, 0
+
+        # 获取缓存命中信息
+        cached_tokens = 0
+        token_details = getattr(usage, "prompt_tokens_details", None)
+        if token_details:
+            cached = getattr(token_details, "cached_tokens", 0)
+            try:
+                cached_tokens = int(cached) if cached else 0
+            except (TypeError, ValueError):
+                cached_tokens = 0
+
+        # 获取缓存创建信息
+        cache_creation_tokens = 0
+        cache_creation = getattr(usage, "cache_creation", None)
+        if cache_creation:
+            created = getattr(cache_creation, "ephemeral_5m_input_tokens", None) or \
+                      getattr(cache_creation, "cache_creation_input_tokens", None)
+            try:
+                cache_creation_tokens = int(created) if created else 0
+            except (TypeError, ValueError):
+                cache_creation_tokens = 0
+
+        # 构建包含缓存信息的日志
+        cache_info = ""
+        if cached_tokens > 0:
+            cache_info += f" | CachedHit: {cached_tokens}"
+        if cache_creation_tokens > 0:
+            cache_info += f" | CacheCreated: {cache_creation_tokens}"
+
+        logger.info(
+            f"[LLM Usage] Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
+        )
+
     def one_chat(self, model_config, messages, timeout=30):
         """单次对话，带超时和重试"""
         client = (
@@ -48,6 +101,8 @@ class LLMClient:
                     timeout=timeout,
                 )
                 full_response = response.choices[0].message.content
+                usage = getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+                self._log_usage(usage, model_config.name)
                 return full_response
             except Exception as e:
                 logger.error(f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}")
@@ -68,17 +123,29 @@ class LLMClient:
                 messages=messages,
                 extra_body={"enable_thinking": False},
                 stream=True,
+                stream_options={"include_usage": True},
                 temperature=0.7,
             )
 
+            last_usage = None
             for chunk in response:
+                if getattr(chunk, "usage", None):
+                    last_usage = chunk.usage
+
+                # include_usage=True 时最后一个 chunk choices 为空列表，跳过
+                if not chunk.choices:
+                    continue
+
                 reasoning = getattr(chunk.choices[0].delta, "reasoning_content", None)
                 if reasoning:
-                    yield f"{reasoning}"
+                    yield reasoning
 
                 content = chunk.choices[0].delta.content
                 if content is not None:
                     yield content
+
+            usage = last_usage or getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+            self._log_usage(usage, model_config.name)
 
         except Exception as e:
             yield f"[Error]: {str(e)}"
@@ -92,8 +159,7 @@ class LLMClient:
                 input=text,
                 dimensions=1536,
             )
-            embedding = response.data[0].embedding
-            return embedding
+            return response.data[0].embedding
         except Exception as e:
             logger.error(f"Get Embedding Error: {e}")
             return None
