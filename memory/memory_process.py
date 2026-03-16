@@ -51,6 +51,7 @@ class Hippocampus:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            call_type="memory_encode",
         )
 
         if resp is None:
@@ -72,15 +73,17 @@ class Hippocampus:
                 f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}"
             )
 
-    def road_memory(self, content):
-        system_prompt = settings.CORE_PERSONA + settings.MEMORY_JUDGE_PROMPT
+    def load_memory(self, content):
+        system_prompt = settings.CORE_PERSONA
         logger.info(f"Loading Memory\n")
-        user_prompt = f"提供的日志如下：\n\n{content}"
+        user_prompt = f"提供的日志如下：\n\n{content}\n\n{settings.MEMORY_JUDGE_PROMPT}"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        resp = self.llm_client.one_chat(settings.SMALL_LLM, messages=messages)
+        resp = self.llm_client.one_chat(
+            settings.SMALL_LLM, messages=messages, call_type="memory_query"
+        )
 
         # 检查 LLM 响应是否为空
         if resp is None:

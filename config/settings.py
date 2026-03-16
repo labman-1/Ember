@@ -76,6 +76,9 @@ class Settings:
 
     IDLE_STATE_UPDATE_PROMPT = PROMPTS.get("idle_state_update_prompt", "")
     IDLE_SPEAKING_UPDATE_PROMPT = PROMPTS.get("idle_speaking_update_prompt", "")
+    STATE_UPDATE_INTERVAL = int(
+        os.getenv("STATE_UPDATE_INTERVAL", "1")
+    )  # 每几轮对话更新一次状态
 
     TIME_ACCEL_FACTOR = float(os.getenv("TIME_ACCEL_FACTOR", "1.0"))
     START_TIME = os.getenv(

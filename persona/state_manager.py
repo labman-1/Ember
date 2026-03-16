@@ -35,6 +35,7 @@ class StateManager:
         self._thinking_lock = threading.Lock()  # 保护 is_thinking
         self._thinking = False
         self.is_sleeping = False
+        self.dialogue_count = 0
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
         self.event_bus.subscribe("system.tick", self._on_tick)
@@ -94,14 +95,15 @@ class StateManager:
             .replace("{{old_state}}", info["old_state"])
         )
 
-    def _ask_llm(self, system_prompt, user_prompt):
+    def _ask_llm(self, system_prompt, user_prompt, call_type: str = "state_update"):
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         return self.llm_client.one_chat(
-            model_config=settings.LARGE_LLM,
+            model_config=settings.SMALL_LLM,
             messages=messages,
+            call_type=call_type,
         )
 
     def _async_log(self, filename, content):
@@ -151,10 +153,14 @@ class StateManager:
     def _on_llm_state_update(self, event: Event):
         if self.is_thinking:
             return
-
+        self.dialogue_count += 1
+        if self.dialogue_count % settings.STATE_UPDATE_INTERVAL != 0:
+            logger.info(
+                f"对话轮次 {self.dialogue_count}，跳过状态更新（间隔={settings.STATE_UPDATE_INTERVAL}）"
+            )
+            return
         self.state_update_timeout = settings.STATE_IDLE_MIN_TIMEOUT
         self.is_thinking = True
-        # 只取最后6条对话历史，减少 token 消耗
         history = event.data.get("history", [])
         logical_now = self._get_logical_now()
         logical_now_str = self._format_logical_time(logical_now)
@@ -163,7 +169,9 @@ class StateManager:
         prompt = f"当前的准确时间: {logical_now_str}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n{settings.STATE_UPDATE_PROMPT}"
 
         try:
-            response = self._ask_llm(settings.CORE_PERSONA, prompt)
+            response = self._ask_llm(
+                settings.CORE_PERSONA, prompt, call_type="state_update"
+            )
             if response:
 
                 new_state = self.llm_client._extract_json(response)
@@ -183,19 +191,18 @@ class StateManager:
 
     def _update_state_due_to_idle(self, logical_now):
         self.is_thinking = True
+        self.dialogue_count = 0  # 重置对话计数器
         logical_now_str = self._format_logical_time(logical_now)
         logger.info(f"[{logical_now_str}] 收到闲置事件，准备更新状态...")
 
         info = self._get_idle_info(logical_now)
 
-        # 只取最后6条对话历史，减少 token 消耗
         history = self.short_term_memory.get_memory().get("history", [])
 
         context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
 
-        memories = self.hippocampus.road_memory(context_for_memory)
+        memories = self.hippocampus.load_memory(context_for_memory)
 
-        # 构建用户消息，将动态内容从 system prompt 移到 user message
         user_content = f"""【环境变更推断任务】
 距离上次互动已经过去 {info['idle_duration']} 分钟，当前时间为 {info['current_time']}。
 历史状态：{info['old_state']}
@@ -210,7 +217,9 @@ class StateManager:
         prompt = user_content + "\n\n" + settings.IDLE_STATE_UPDATE_PROMPT
 
         try:
-            response = self._ask_llm(settings.CORE_PERSONA, prompt)
+            response = self._ask_llm(
+                settings.CORE_PERSONA, prompt, call_type="idle_evolve"
+            )
             if response:
                 data = self.llm_client._extract_json(response)
                 if data is None:

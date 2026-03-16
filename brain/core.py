@@ -62,7 +62,7 @@ class Brain:
                 "history:" + history,
                 "state:" + state,
             ]
-            road_result = self.hippocampus.road_memory(messages)
+            road_result = self.hippocampus.load_memory(messages)
             memories = (
                 json.dumps(road_result, ensure_ascii=False) if road_result else ""
             )

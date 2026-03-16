@@ -36,8 +36,11 @@ class LLMClient:
             )
             return None
 
-    def _log_usage(self, usage, model_name: str):
-        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息"""
+    def _log_usage(self, usage, model_name: str, call_type: str = "dialogue"):
+        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息和调用类型
+        
+        call_type: dialogue(对话) | state_update(状态更新) | idle_evolve(闲置演化) | memory_query(记忆检索) | memory_encode(记忆编码)
+        """
         if usage is None:
             logger.debug("[LLM Usage] usage 为空")
             return
@@ -88,11 +91,14 @@ class LLMClient:
             cache_info += f" | CacheCreated: {cache_creation_tokens}"
 
         logger.info(
-            f"[LLM Usage] Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
+            f"[LLM Usage] Type: {call_type} | Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
         )
 
-    def one_chat(self, model_config, messages, timeout=60):
-        """单次对话，带超时和重试"""
+    def one_chat(self, model_config, messages, timeout=60, call_type: str = "state_update"):
+        """单次对话，带超时和重试
+        
+        call_type: 用于区分调用来源，默认 state_update（非对话类调用）
+        """
         client = (
             self.large_client
             if model_config == settings.LARGE_LLM
@@ -114,7 +120,7 @@ class LLMClient:
                 usage = getattr(response, "usage", None) or getattr(
                     response, "usage_metadata", None
                 )
-                self._log_usage(usage, model_config.name)
+                self._log_usage(usage, model_config.name, call_type)
                 return full_response
             except Exception as e:
                 logger.error(
@@ -124,7 +130,11 @@ class LLMClient:
                     return None
         return None
 
-    def stream_chat(self, model_config, messages):
+    def stream_chat(self, model_config, messages, call_type: str = "dialogue"):
+        """流式对话
+        
+        call_type: 用于区分调用来源，默认 dialogue（对话类调用）
+        """
         client = (
             self.large_client
             if model_config == settings.LARGE_LLM
@@ -163,7 +173,7 @@ class LLMClient:
                 or getattr(response, "usage", None)
                 or getattr(response, "usage_metadata", None)
             )
-            self._log_usage(usage, model_config.name)
+            self._log_usage(usage, model_config.name, call_type)
 
         except Exception as e:
             yield f"[Error]: {str(e)}"

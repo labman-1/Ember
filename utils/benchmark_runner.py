@@ -80,7 +80,7 @@ def restore_env():
 # ── 日志解析 ───────────────────────────────────────────────────────────────────
 
 _USAGE_RE = re.compile(
-    r"\[LLM Usage\] Model: (?P<model>\S+) \| Prompt: (?P<prompt>\d+)"
+    r"\[LLM Usage\] Type: (?P<type>\S+) \| Model: (?P<model>\S+) \| Prompt: (?P<prompt>\d+)"
     r" \| Completion: (?P<completion>\d+) \| Total: (?P<total>\d+)"
     r"(?:.*?CachedHit: (?P<cached>\d+))?"
 )
@@ -114,6 +114,7 @@ def parse_logs_after(since_ts: float):
             if mu:
                 usages.append(
                     dict(
+                        type=mu.group("type"),
                         model=mu.group("model"),
                         prompt=int(mu.group("prompt")),
                         completion=int(mu.group("completion")),
@@ -259,14 +260,19 @@ def run_group(
 
         usages, breakdowns = parse_logs_after(t0 - 1)
 
+        # 分离对话和其他类型的调用
+        dialogue_usages = [u for u in usages if u.get("type") == "dialogue"]
+        other_usages = [u for u in usages if u.get("type") != "dialogue"]
+
         row: dict = {
             "turn": i + 1,
             "text": msg,
             "response": response_text[:120] if response_text else "",
+            "background_tokens": sum(u["total"] for u in other_usages),
         }
 
-        if usages:
-            u = usages[-1]
+        if dialogue_usages:
+            u = dialogue_usages[-1]
             row.update(
                 prompt=u["prompt"],
                 completion=u["completion"],
@@ -346,6 +352,8 @@ def generate_report(
     total_b_p = sum(r["prompt"] for r in b_results if r.get("prompt", -1) >= 0)
     total_a_c = sum(r.get("cached", 0) for r in a_results)
     total_b_c = sum(r.get("cached", 0) for r in b_results)
+    total_a_bg = sum(r.get("background_tokens", 0) for r in a_results)
+    total_b_bg = sum(r.get("background_tokens", 0) for r in b_results)
     growth = (total_b_p - total_a_p) / total_a_p * 100 if total_a_p > 0 else 0
     b_manual_a = baseline.get("a_total_tokens")
     b_manual_b = baseline.get("b_total_tokens")
@@ -416,6 +424,22 @@ def generate_report(
         L.append(
             f"> B 组比 A 组多消耗 **{total_b_p - total_a_p}** prompt tokens"
             f"（**+{growth:.1f}%**），平均每轮额外注入 **{avg_delta}** tokens。\n"
+        )
+
+    # ── 2.5. 后台调用 Token 统计 ───────────────────────────────────────────────
+    L.append("## 2.5. 后台调用 Token 统计\n")
+    L.append("> 后台调用包括：状态更新(state_update)、闲置演化(idle_evolve)、记忆检索(memory_query)、记忆编码(memory_encode)\n")
+    L.append("| 组别 | 后台 Total | 对话 Total | 后台占比 |")
+    L.append("|------|-----------|-----------|---------|")
+    for grp_lbl, grp_p, grp_bg in [("A", total_a_p, total_a_bg), ("B", total_b_p, total_b_bg)]:
+        bg_pct = grp_bg / (grp_p + grp_bg) * 100 if (grp_p + grp_bg) > 0 else 0
+        L.append(f"| {grp_lbl} | {grp_bg} | {grp_p} | {bg_pct:.1f}% |")
+    L.append("")
+    total_bg = total_a_bg + total_b_bg
+    total_dialogue = total_a_p + total_b_p
+    if total_bg > 0:
+        L.append(
+            f"> 后台调用合计消耗 **{total_bg}** tokens，占总消耗 **{total_bg / (total_bg + total_dialogue) * 100:.1f}%**。\n"
         )
 
     # ── 3. 与历史基线对比 ──────────────────────────────────────────────────────
