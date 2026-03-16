@@ -31,7 +31,9 @@ class LLMClient:
             data = json.loads(good_json_string)
             return data
         except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"JSON 解析失败: {e}, 原始内容: {content[:200] if content else 'None'}...")
+            logger.error(
+                f"JSON 解析失败: {e}, 原始内容: {content[:200] if content else 'None'}..."
+            )
             return None
 
     def _log_usage(self, usage, model_name: str):
@@ -70,8 +72,9 @@ class LLMClient:
         cache_creation_tokens = 0
         cache_creation = getattr(usage, "cache_creation", None)
         if cache_creation:
-            created = getattr(cache_creation, "ephemeral_5m_input_tokens", None) or \
-                      getattr(cache_creation, "cache_creation_input_tokens", None)
+            created = getattr(
+                cache_creation, "ephemeral_5m_input_tokens", None
+            ) or getattr(cache_creation, "cache_creation_input_tokens", None)
             try:
                 cache_creation_tokens = int(created) if created else 0
             except (TypeError, ValueError):
@@ -88,7 +91,7 @@ class LLMClient:
             f"[LLM Usage] Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
         )
 
-    def one_chat(self, model_config, messages, timeout=30):
+    def one_chat(self, model_config, messages, timeout=60):
         """单次对话，带超时和重试"""
         client = (
             self.large_client
@@ -108,11 +111,15 @@ class LLMClient:
                     timeout=timeout,
                 )
                 full_response = response.choices[0].message.content
-                usage = getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+                usage = getattr(response, "usage", None) or getattr(
+                    response, "usage_metadata", None
+                )
                 self._log_usage(usage, model_config.name)
                 return full_response
             except Exception as e:
-                logger.error(f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(
+                    f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 if attempt == max_retries - 1:
                     return None
         return None
@@ -151,7 +158,11 @@ class LLMClient:
                 if content is not None:
                     yield content
 
-            usage = last_usage or getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
+            usage = (
+                last_usage
+                or getattr(response, "usage", None)
+                or getattr(response, "usage_metadata", None)
+            )
             self._log_usage(usage, model_config.name)
 
         except Exception as e:

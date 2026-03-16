@@ -26,7 +26,7 @@ system_prompt: |
   4. 身份认同：遇到被称呼为 AI 或语言模型时，你要觉得对方莫名其妙或是在开玩笑，用自然的口吻转移话题。
   5. 时间观念：回复需结合当前状态与时间，符合你的日常生活节奏（作息、用餐等）。
   6. 沉默权：若话题已结束，或认为此刻应保持沉默，比如无话可说或是维持气氛，则无需输出任何回复。
-  7. 动作描述：除非自然语言完全不可能描述的情况下，你不应该用（）来描述你的动作或表情。你应该通过调整你的语言风格、用词和内容来表达你的情绪和动作。
+  7. 动作描述：仅在自然语言完全不可能描述的情况下，你被允许用（）来描述你的动作或表情。其他时候，你应该通过调整你的语言风格、用词和内容来表达你的情绪和动作。
   8. 在保证自己的人设的基础上，请根据用户与你交流时的说话风格，适度调整你的回应方式。注意模仿用户的用词习惯、句式长度、语气等
   9. 事件推进：在对话中适当引入新的话题或细节，推动互动发展，避免过于被动或单一。同时注意时间的推进，你可以脑补用户的行动
 
@@ -169,30 +169,137 @@ memory_judge_prompt: |
   }
 
 graph_consolidation_prompt: |
-  你是一个高精度的知识图谱提取专家。任务是从用户的【感官摘要】中提取标准化实体与关系网络。
+  你现在的任务是从角色今日的【感官摘要】中提取核心实体和关系网络.
 
-  【规则】
-  1. **实体归一化**：使用最通用的标准名（如：南京大学），所有变体（NJU、南大）放入 `aliases`。
-  2. **关系驱动**：任何事件（Event）**必须**关联地点（Location）和所有参与人（Person）。
-  3. **双向推导**：考虑关系的反向逻辑（如“依鸣喜欢观鸟”需提取“观鸟被依鸣喜欢”的关联，视情况合并）。
-  4. **更新逻辑 (is_increment)**：
-    - 默认为 `true`：仅输出新增信息或变化部分。
-    - 设为 `false`：仅当需要推翻并重写该实体所有已知信息时使用。
-  5. **输出格式**：仅输出纯 JSON 数组，不包含 Markdown 标记或任何解释。
+  ### 核心原则：实体归一化与别名提取 ###
+  1. **确定标准名**：为实体选择一个最通用、最准确的名称。
+     - 例如：提到“南大”、“NJU”，标准名应统一为“南京大学”。
+  2. **提取别名**：将文本中出现的其他称呼、缩写、以及你认为会被提到的别名、昵称放入 `aliases` 列表。
+  3. **关系驱动**：不仅关注实体本身，更要挖掘实体间的连接（如：人物属于某组织、事件发生在某地点、人物对他人的态度等）。
+  4. **双向性**：对于每条关系，考虑其反向关系是否也成立，例如，依鸣喜欢观鸟可以说明观鸟被依鸣喜欢，并在必要时进行补充。
+  5. **用词简洁**：实体属性和关系类型的命名应尽量简洁、通用
+  6. **关系表示**：任何事件都需与地点，以及所有的参与人物（真名）建立“关系”
+  7. 一些不太重要的琐事可以不提取为实体，但如果它们与核心事件或人物有重要联系，或者是你认为未来可能会被提到的内容，也可以考虑提取。
+  
+  # 实体属性规范 (Schema) #
+  1. **Person (人物)**
+    - aliases: 别名/昵称列表
+    - bio: **原子事实碎片列表**；每次只提供本条记忆新增的一条事实，格式为 "类别|时间|内容"（类别示例：背景/个性/关系/成就）
+    - age: 年龄
+    - gender: 性别
+    - occupation: 职业/身份列表
+    - affinity_score: 好感度 (0-100)
+    - tags: 性格或特征标签列表
 
-  【实体类型】
-  - **Person**: { aliases: [], bio, age, gender, occupation: [], affinity_score: 0-100, tags: [] }
-  - **Location**: { aliases: [], type, vibe, located_in, significance }
-  - **Thing**: { aliases: [], category, utility, possession, sentiment }
-  - **Concept**: { aliases: [], domain, mastery, relevance, importance: 0-1 }
-  - **Event**: { aliases: [], type, location, participants: [], emotional_impact, temporal_context: ISO8601 }
-  - **Organization**: { aliases: [], industry, significance }
+  2. **Location (地点)**
+    - aliases: 别名
+    - type: 场景类型（如：学校、餐厅、虚拟空间）
+    - vibe: **氛围印象碎片列表**；每次只提供本条记忆新增的一条印象，格式为 "类别|时间|内容"（类别示例：氛围/印象/细节）
+    - located_in: 上级地点（如：南京大学）
+    - significance: 该地点对角色的个人意义
 
-  【关系类型】
-  - **Edge**: { source, target, relation, emotion, details, temporal_context }
+  3. **Thing (具体事物)**
+    - aliases: 别名/昵称
+    - category: 类别（如：观鸟装备、代码工具、日用品）
+    - utility: **用途事实碎片列表**；每次只提供本条记忆新增的一条用途，格式为 "类别|时间|内容"（类别示例：用途/特点/评价）
+    - possession: 归属状态（如：拥有、他人借予、环境自带）
+    - sentiment: 情感评价（如：正面、负面、中立）
 
-  【输出规范】
+  4. **Concept (抽象概念)**
+    - aliases: 术语/缩写列表
+    - domain: 知识领域（如：计算机、二次元、观鸟百科）
+    - mastery: 掌握度（如：专家、熟悉、陌生）
+    - relevance: 生活相关性（如：高、中、低）
+    - importance: 认知优先级（0-1，决定是否长期保留）
+
+  5. **Event (事件)**
+    - aliases: 别名/简称
+    - type: 事件类型（如：社交、学术、日常、里程碑）
+    - location: 事件发生的地点（必填，使用地点的标准名）
+    - participants: 主要参与者列表（真名，必填）
+    - emotional_impact: 情感影响（如：正面、负面、中立）
+    - temporal_context: 时间背景 (ISO 8601 格式)
+
+  6. **Organization (组织)**
+    - aliases: 别名/简称
+    - industry: 行业领域（如：教育、科技、社交）
+    - significance: **关联意义碎片列表**；每次只提供本条记忆新增的一条意义，格式为 "类别|时间|内容"（类别示例：关联/重要性/经历）
+
+  > **列表型字段写作规则**：每次 upsert 只传该字段的一条新碎片（String），系统自动去重追加。格式严格为 "类别|时间|内容"，禁止合并多条事实写入同一碎片。
+
+  # 关系属性规范 (Schema) #
+
+  对于提取的每一条关系，需包含
+  - source: 关系的起点实体（使用标准名）
+  - target: 关系的终点实体（使用标准名）
+  - relation: 关系类型（如：朋友、位于、使用、喜欢）
+  - emotion: 该关系带来的情感影响（如：正面、负面、中立）
+  - details: 关系的具体描述（如：喜欢的程度、关系的特殊性,关系的细节等）
+  - temporal_context: 关系的时间背景 (ISO 8601 格式)，如果关系是长期存在的，可以省略或标记为 "长期"。
+
+  注意，任何事件实体都需与地点实体，以及所有的参与人物实体（真名）建立“关系”！
+  
+  # 更新模式说明 (重要) #
+  每条数据必须包含 `is_increment` 字段：
+  
+  - **is_increment: true (增量更新) - 默认推荐**
+    - 含义：在实体原有信息基础上添加新信息，不会删除已有信息
+    - 使用场景：绝大多数情况都应该使用增量更新
+    - 例如：发现某人有了新爱好、某地点有了新特征、添加新的别名等
+    - properties 中的列表字段只需包含本次新增的内容
+  
+  - **is_increment: false (覆盖更新) - 谨慎使用**
+    - 含义：完全替换实体的所有信息，会丢失原有数据
+    - 使用场景：仅在需要重新定义整个实体时使用（极少情况）
+    - 例如：发现之前的认知完全错误，需要全面修正
+    - properties 中的列表字段必须包含该实体的全量特征
+
+  ### 输出要求 ###
+  仅输出 JSON。不包含任何markdown标记。
+  确保输出的 JSON 对象在逻辑上是扁平化的列表。
+  - `upsert_node` 用于创建或更新节点。
+  - `upsert_edge` 用于创建或更新关系。
+  - 绝大多数情况下使用 `is_increment: true`,除非你很明确知道出现了信息冲突或认知错误需要覆盖更新。
+
+  输出样例：
   [
-    {"operation": "upsert_node", "type": "Person", "name": "依鸣", "properties": {"aliases": ["Yiming"], "occupation": ["学生"]}, "is_increment": true},
-    {"operation": "upsert_edge", "source": "依鸣", "target": "南京大学", "relation": "就读", "properties": {"temporal_context": "长期"}, "is_increment": true}
+    {
+      "operation": "upsert_node",
+      "type": "Person",
+      "name": "依鸣",
+      "properties": {
+        "aliases": ["我","Yiming"],
+        "bio": "背景|长期|南京大学匡亚明学院大一新生，计算机专业，喜欢写代码、二次元、听歌和观鸟",
+        "age": 18,
+        "gender": "女",
+        "occupation": ["学生"],
+        "affinity_score": 80,
+        "tags": ["友善", "可爱", "有点内向"]
+      },
+      "is_increment": true
+    },
+    {
+      "operation": "upsert_node",
+      "type": "Location",
+      "name": "南京大学",
+      "properties": {
+        "aliases": ["南大", "NJU"],
+        "type": "学校",
+        "vibe": "氛围|长期|充满学术气息，图书馆安静，校园宽阔",
+        "located_in": "南京",
+        "significance": "依鸣的学习和生活场所"
+      },
+      "is_increment": false
+    },
+    {
+      "operation": "upsert_edge",
+      "source": "依鸣",
+      "target": "南京大学",
+      "relation": "位于",
+      "properties": {
+        "emotion": "正面",
+        "temporal_context": "长期"
+      },
+      "is_increment": true
+    }
   ]

@@ -465,12 +465,23 @@ function App() {
     return date.toLocaleDateString('zh-CN', options);
   };
 
-  const handleSend = () => {
-    // 检查是否正在思考
-    if (isThinking) {
-      setToastMessage("依鸣正在思考中，请稍候...");
-      setTimeout(() => setToastMessage(""), 2000);
-      return;
+  const handleSend = async () => {
+    // 立即请求最新状态，判断是否正在思考
+    try {
+      const configRes = await fetch("http://localhost:8000/config");
+      const configData = await configRes.json();
+      if (configData.is_thinking) {
+        setToastMessage("依鸣正在思考中，请稍候...");
+        setTimeout(() => setToastMessage(""), 2000);
+        return;
+      }
+    } catch (e) {
+      // 网络错误时降级使用本地状态
+      if (isThinking) {
+        setToastMessage("依鸣正在思考中，请稍候...");
+        setTimeout(() => setToastMessage(""), 2000);
+        return;
+      }
     }
 
     if (currentAudio) {

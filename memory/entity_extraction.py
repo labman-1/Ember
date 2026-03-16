@@ -244,7 +244,9 @@ class EntityExtractionMemory:
         ]
 
         try:
-            response = self.llm_client.one_chat(settings.LARGE_LLM, messages)
+            response = self.llm_client.one_chat(
+                settings.LARGE_LLM, messages, timeout=180
+            )
             if response is None:
                 logger.error("LLM 返回空响应")
                 return []
