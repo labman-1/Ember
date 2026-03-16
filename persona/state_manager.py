@@ -35,6 +35,7 @@ class StateManager:
         self._thinking_lock = threading.Lock()  # 保护 is_thinking
         self._thinking = False
         self.is_sleeping = False
+        self.dialogue_count = 0
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
         self.event_bus.subscribe("system.tick", self._on_tick)
@@ -94,14 +95,15 @@ class StateManager:
             .replace("{{old_state}}", info["old_state"])
         )
 
-    def _ask_llm(self, system_prompt, user_prompt):
+    def _ask_llm(self, system_prompt, user_prompt, call_type: str = "state_update"):
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         return self.llm_client.one_chat(
-            model_config=settings.LARGE_LLM,
+            model_config=settings.SMALL_LLM,
             messages=messages,
+            call_type=call_type,
         )
 
     def _async_log(self, filename, content):
@@ -119,13 +121,13 @@ class StateManager:
         del data["近期综合轨迹"]
         self._async_log(
             "./config/chat_history.log",
-            f"{{状态更新: {json.dumps(data, ensure_ascii=False)}}}",
+            f"{self.state_zip}",
         )
 
         self.event_bus.publish(Event("state.update", data={"new_state": new_state}))
 
         # 使用锁保护文件写入，防止竞争条件
-        if not hasattr(self, '_state_lock'):
+        if not hasattr(self, "_state_lock"):
             self._state_lock = threading.Lock()
 
         with self._state_lock:
@@ -151,7 +153,12 @@ class StateManager:
     def _on_llm_state_update(self, event: Event):
         if self.is_thinking:
             return
-
+        self.dialogue_count += 1
+        if self.dialogue_count % settings.STATE_UPDATE_INTERVAL != 0:
+            logger.info(
+                f"对话轮次 {self.dialogue_count}，跳过状态更新（间隔={settings.STATE_UPDATE_INTERVAL}）"
+            )
+            return
         self.state_update_timeout = settings.STATE_IDLE_MIN_TIMEOUT
         self.is_thinking = True
         history = event.data.get("history", [])
@@ -162,7 +169,9 @@ class StateManager:
         prompt = f"当前的准确时间: {logical_now_str}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n{settings.STATE_UPDATE_PROMPT}"
 
         try:
-            response = self._ask_llm(settings.CORE_PERSONA, prompt)
+            response = self._ask_llm(
+                settings.CORE_PERSONA, prompt, call_type="state_update"
+            )
             if response:
 
                 new_state = self.llm_client._extract_json(response)
@@ -182,6 +191,7 @@ class StateManager:
 
     def _update_state_due_to_idle(self, logical_now):
         self.is_thinking = True
+        self.dialogue_count = 0  # 重置对话计数器
         logical_now_str = self._format_logical_time(logical_now)
         logger.info(f"[{logical_now_str}] 收到闲置事件，准备更新状态...")
 
@@ -191,18 +201,25 @@ class StateManager:
 
         context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
 
-        memories = self.hippocampus.road_memory(context_for_memory)
+        memories = self.hippocampus.load_memory(context_for_memory)
 
-        prompt = self._apply_idle_template(settings.IDLE_STATE_UPDATE_PROMPT, info)
+        user_content = f"""【环境变更推断任务】
+距离上次互动已经过去 {info['idle_duration']} 分钟，当前时间为 {info['current_time']}。
+历史状态：{info['old_state']}
+"""
 
         if memories:
-            prompt = (
+            user_content = (
                 f"[脑海闪现的记忆]:\n{memories}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n"
-                + prompt
+                + user_content
             )
 
+        prompt = user_content + "\n\n" + settings.IDLE_STATE_UPDATE_PROMPT
+
         try:
-            response = self._ask_llm(settings.CORE_PERSONA, prompt)
+            response = self._ask_llm(
+                settings.CORE_PERSONA, prompt, call_type="idle_evolve"
+            )
             if response:
                 data = self.llm_client._extract_json(response)
                 if data is None:
@@ -254,14 +271,35 @@ class StateManager:
 
     @property
     def prompt_injection(self):
-        state_text = json.dumps(self.current_state, ensure_ascii=False, indent=2)
-        return f"\n\n###依鸣的前一时刻状态###\n{state_text}\n\n"
+        return f"\n\n【角色的先前状态】\n{self.state_zip_full}\n\n"
+
+    @property
+    def state_zip_full(self):
+        s = self.current_state
+        line = s.get("近期综合轨迹", "")
+        return f"{self.state_zip}\n近期综合轨迹:{line}\n"
+
+    @property
+    def state_zip(self):
+        """压缩状态注入：完整保留字段，用紧凑格式节省 token"""
+        s = self.current_state
+        time_str = s.get("对应时间", "")
+        pad = f"P:{s.get('P',5)} A:{s.get('A',5)} D:{s.get('D',5)}"
+        situation = s.get("客观情境", "")
+        inner = s.get("内心活动", "")
+        goal = s.get("近期目标", "")
+
+        # 紧凑格式，完整保留内容
+        return f"\n[状态 {time_str} | {pad}]\n情境:{situation}\n内心:{inner}\n目标:{goal}\n"
 
     @property
     def speaking_prompt_injection(self):
         logical_now = self._get_logical_now()
         info = self._get_idle_info(logical_now)
-        prompt = self._apply_idle_template(settings.IDLE_SPEAKING_UPDATE_PROMPT, info)
+        # 将动态内容构建到用户消息中，保持 system prompt 静态
+        prompt = f"""距离上次互动已过去 {info['idle_duration']} 分钟，当前 {info['current_time']}。原状态为 {info['old_state']}。
+{settings.IDLE_SPEAKING_UPDATE_PROMPT}
+接下来提供之前的聊天记录供参考。"""
         return f"\n\n###你的任务###\n{prompt}\n\n"
 
     @property

@@ -29,8 +29,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
-LOG_FILE   = ROOT / "data" / "logs" / "system.log"
-ENV_FILE   = ROOT / ".env"
+LOG_FILE = ROOT / "data" / "logs" / "system.log"
+ENV_FILE = ROOT / ".env"
 ENV_BACKUP = ROOT / ".env.benchmark_backup"
 SCRIPT_FILE = ROOT / "utils" / "test_script.json"
 CONFIG_FILE = ROOT / "utils" / "test_config.json"
@@ -39,6 +39,7 @@ TIMEOUT = 120  # 每轮最长等待秒数
 
 
 # ── 环境变量控制 ───────────────────────────────────────────────────────────────
+
 
 def _env_set_temperature(temp: float):
     """在 .env 中写入或更新 LLM_TEMPERATURE。"""
@@ -79,7 +80,7 @@ def restore_env():
 # ── 日志解析 ───────────────────────────────────────────────────────────────────
 
 _USAGE_RE = re.compile(
-    r"\[LLM Usage\] Model: (?P<model>\S+) \| Prompt: (?P<prompt>\d+)"
+    r"\[LLM Usage\] Type: (?P<type>\S+) \| Model: (?P<model>\S+) \| Prompt: (?P<prompt>\d+)"
     r" \| Completion: (?P<completion>\d+) \| Total: (?P<total>\d+)"
     r"(?:.*?CachedHit: (?P<cached>\d+))?"
 )
@@ -111,25 +112,31 @@ def parse_logs_after(since_ts: float):
                 continue
             mu = _USAGE_RE.search(line)
             if mu:
-                usages.append(dict(
-                    model=mu.group("model"),
-                    prompt=int(mu.group("prompt")),
-                    completion=int(mu.group("completion")),
-                    total=int(mu.group("total")),
-                    cached=int(mu.group("cached") or 0),
-                ))
+                usages.append(
+                    dict(
+                        type=mu.group("type"),
+                        model=mu.group("model"),
+                        prompt=int(mu.group("prompt")),
+                        completion=int(mu.group("completion")),
+                        total=int(mu.group("total")),
+                        cached=int(mu.group("cached") or 0),
+                    )
+                )
             mb = _BREAKDOWN_RE.search(line)
             if mb:
-                breakdowns.append(dict(
-                    base=int(mb.group("base")),
-                    mem=int(mb.group("mem")),
-                    history=int(mb.group("history")),
-                    state=int(mb.group("state")),
-                ))
+                breakdowns.append(
+                    dict(
+                        base=int(mb.group("base")),
+                        mem=int(mb.group("mem")),
+                        history=int(mb.group("history")),
+                        state=int(mb.group("state")),
+                    )
+                )
     return usages, breakdowns
 
 
 # ── 模块初始化 ─────────────────────────────────────────────────────────────────
+
 
 def init_modules():
     """初始化 Ember 后端模块（与 main.py 相同的接线顺序）。"""
@@ -144,36 +151,40 @@ def init_modules():
     from config.settings import settings
     import config.logging_config  # noqa: F401 — 必须激活日志配置
 
-    event_bus       = EventBus()
-    heartbeat       = Heartbeat(event_bus, interval=settings.HEARTBEAT_INTERVAL)
-    memory          = ShortTermMemory(
+    event_bus = EventBus()
+    heartbeat = Heartbeat(event_bus, interval=settings.HEARTBEAT_INTERVAL)
+    memory = ShortTermMemory(
         base_prompt=settings.SYSTEM_PROMPT,
         max_memory_size=settings.CONTEXT_WINDOW_SIZE,
     )
     episodic_memory = EpisodicMemory(event_bus)
-    hippocampus     = Hippocampus(event_bus)
-    state_manager   = StateManager(event_bus, hippocampus, memory)
-    brain           = Brain(event_bus, state_manager, memory, hippocampus)
-    db_memory       = DBMemory(event_bus)
+    hippocampus = Hippocampus(event_bus)
+    state_manager = StateManager(event_bus, hippocampus, memory)
+    brain = Brain(event_bus, state_manager, memory, hippocampus)
+    db_memory = DBMemory(event_bus)
     heartbeat.start()
 
     return {
-        "event_bus":       event_bus,
-        "heartbeat":       heartbeat,
-        "memory":          memory,
+        "event_bus": event_bus,
+        "heartbeat": heartbeat,
+        "memory": memory,
         "episodic_memory": episodic_memory,
-        "hippocampus":     hippocampus,
-        "state_manager":   state_manager,
-        "brain":           brain,
-        "db_memory":       db_memory,
+        "hippocampus": hippocampus,
+        "state_manager": state_manager,
+        "brain": brain,
+        "db_memory": db_memory,
     }
 
 
 def reset_memory():
     """白板重置：清空所有记忆层。"""
     from utils.reset_memory import (
-        reset_short_term, reset_state, reset_postgres, reset_neo4j,
+        reset_short_term,
+        reset_state,
+        reset_postgres,
+        reset_neo4j,
     )
+
     reset_short_term()
     reset_state()
     reset_postgres()
@@ -182,7 +193,10 @@ def reset_memory():
 
 # ── 单组运行器 ─────────────────────────────────────────────────────────────────
 
-def run_group(label: str, modules: dict, turns: list, meta: dict, cfg: dict) -> list[dict]:
+
+def run_group(
+    label: str, modules: dict, turns: list, meta: dict, cfg: dict
+) -> list[dict]:
     """
     运行一组对话，收集每轮的 Token 数据、Prompt 分布、延迟和 ROI。
 
@@ -191,21 +205,25 @@ def run_group(label: str, modules: dict, turns: list, meta: dict, cfg: dict) -> 
     from core.event_bus import Event
 
     event_bus = modules["event_bus"]
-    brain     = modules["brain"]
+    brain = modules["brain"]
 
     finished_q = queue.Queue()
-    event_bus.subscribe("llm.finished", lambda e: finished_q.put(e.data.get("text", "")))
+    event_bus.subscribe(
+        "llm.finished", lambda e: finished_q.put(e.data.get("text", ""))
+    )
 
     # ── TTFT 追踪（订阅一次，通过 _current 共享当前轮次）──
-    _current      = {"idx": -1}
-    ttft_tracker  = {}  # turn_idx → 首个 chunk 到达时刻
-    latency_on    = cfg.get("latency", {}).get("enabled", False)
+    _current = {"idx": -1}
+    ttft_tracker = {}  # turn_idx → 首个 chunk 到达时刻
+    latency_on = cfg.get("latency", {}).get("enabled", False)
 
     if latency_on:
+
         def _on_chunk(e):
             idx = _current["idx"]
             if idx >= 0 and idx not in ttft_tracker:
                 ttft_tracker[idx] = time.time()
+
         event_bus.subscribe("llm.chunk", _on_chunk)
 
     # ── 记忆 ROI 检查点：{turn_idx (0-based) → [keywords]} ──
@@ -238,21 +256,28 @@ def run_group(label: str, modules: dict, turns: list, meta: dict, cfg: dict) -> 
             time.sleep(0.05)
 
         # 3. 等待日志落盘
-        time.sleep(0.1)
+        time.sleep(1)
 
         usages, breakdowns = parse_logs_after(t0 - 1)
 
+        # 分离对话和其他类型的调用
+        dialogue_usages = [u for u in usages if u.get("type") == "dialogue"]
+        other_usages = [u for u in usages if u.get("type") != "dialogue"]
+
         row: dict = {
-            "turn":     i + 1,
-            "text":     msg,
+            "turn": i + 1,
+            "text": msg,
             "response": response_text[:120] if response_text else "",
+            "background_tokens": sum(u["total"] for u in other_usages),
         }
 
-        if usages:
-            u = usages[-1]
+        if dialogue_usages:
+            u = dialogue_usages[-1]
             row.update(
-                prompt=u["prompt"], completion=u["completion"],
-                total=u["total"], cached=u["cached"],
+                prompt=u["prompt"],
+                completion=u["completion"],
+                total=u["total"],
+                cached=u["cached"],
             )
         else:
             row.update(prompt=-1, completion=-1, total=-1, cached=0)
@@ -261,31 +286,34 @@ def run_group(label: str, modules: dict, turns: list, meta: dict, cfg: dict) -> 
 
         if latency_on:
             ttft = round(ttft_tracker[i] - t0, 3) if i in ttft_tracker else None
-            row["ttft"]          = ttft
+            row["ttft"] = ttft
             row["total_latency"] = round(t_end - t0, 3)
 
         if i in roi_checks and response_text:
-            kws  = roi_checks[i]
+            kws = roi_checks[i]
             hits = [kw for kw in kws if kw in response_text]
             row["roi"] = {
                 "keywords": kws,
-                "hits":     hits,
-                "score":    round(len(hits) / len(kws), 2) if kws else 0,
+                "hits": hits,
+                "score": round(len(hits) / len(kws), 2) if kws else 0,
             }
 
         results.append(row)
 
         # 终端摘要
-        cached_str  = f"  cached={row['cached']}" if row.get("cached", 0) > 0 else ""
+        cached_str = f"  cached={row['cached']}" if row.get("cached", 0) > 0 else ""
         latency_str = (
             f"  TTFT={row.get('ttft')}s" if latency_on and row.get("ttft") else ""
         )
-        print(f"         Prompt={row['prompt']}  Comp={row['completion']}{cached_str}{latency_str}")
+        print(
+            f"         Prompt={row['prompt']}  Comp={row['completion']}{cached_str}{latency_str}"
+        )
 
     return results
 
 
 # ── 压力测试 ───────────────────────────────────────────────────────────────────
+
 
 def run_stress_test(modules: dict, turns_base: list, n: int, cfg: dict) -> list[dict]:
     """运行 N 轮（循环脚本），寻找 Token 增长天花板和 Neo4j 性能瓶颈。"""
@@ -298,6 +326,7 @@ def run_stress_test(modules: dict, turns_base: list, n: int, cfg: dict) -> list[
 
 
 # ── 报告生成 ───────────────────────────────────────────────────────────────────
+
 
 def _bd_pct(bd: dict, field: str, total_chars: int) -> str:
     v = bd.get(field, 0)
@@ -314,7 +343,7 @@ def generate_report(
     stress_results=None,
     run_ts: str = None,
 ) -> Path:
-    ts_str   = run_ts or datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts_str = run_ts or datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = ROOT / f"benchmark_report_{ts_str}.md"
     baseline = cfg.get("baseline", {})
 
@@ -323,7 +352,9 @@ def generate_report(
     total_b_p = sum(r["prompt"] for r in b_results if r.get("prompt", -1) >= 0)
     total_a_c = sum(r.get("cached", 0) for r in a_results)
     total_b_c = sum(r.get("cached", 0) for r in b_results)
-    growth    = (total_b_p - total_a_p) / total_a_p * 100 if total_a_p > 0 else 0
+    total_a_bg = sum(r.get("background_tokens", 0) for r in a_results)
+    total_b_bg = sum(r.get("background_tokens", 0) for r in b_results)
+    growth = (total_b_p - total_a_p) / total_a_p * 100 if total_a_p > 0 else 0
     b_manual_a = baseline.get("a_total_tokens")
     b_manual_b = baseline.get("b_total_tokens")
 
@@ -331,7 +362,9 @@ def generate_report(
 
     L.append("# Ember Benchmark Report")
     L.append(f"\n**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    L.append(f"**测试脚本**: `utils/test_script.json`（{len(meta.get('turns', []))} 轮对话）")
+    L.append(
+        f"**测试脚本**: `utils/test_script.json`（{len(meta.get('turns', []))} 轮对话）"
+    )
     L.append(f"**LLM_TEMPERATURE**: `0.0`（强制锁定，确保回复确定性）")
     L.append(f"\n---\n")
 
@@ -340,14 +373,25 @@ def generate_report(
     L.append("> `base` = 固定人设 System Prompt 字符数，`mem` = 注入的记忆字符数，")
     L.append("> `history` = 打包后的对话历史字符数，`state` = PAD 状态注入字符数。\n")
 
-    for group_label, group_results in [("A（白板）", a_results), ("B（累积）", b_results)]:
+    for group_label, group_results in [
+        ("A（白板）", a_results),
+        ("B（累积）", b_results),
+    ]:
         L.append(f"### {group_label}\n")
-        L.append("| 轮 | Prompt | Comp | Cached | base | mem | history | state | 记忆占比 |")
-        L.append("|---|--------|------|--------|------|-----|---------|-------|---------|")
+        L.append(
+            "| 轮 | Prompt | Comp | Cached | base | mem | history | state | 记忆占比 |"
+        )
+        L.append(
+            "|---|--------|------|--------|------|-----|---------|-------|---------|"
+        )
         for r in group_results:
             bd = r.get("breakdown") or {}
             total_chars = sum(bd.get(k, 0) for k in ("base", "mem", "history", "state"))
-            mem_pct = f"{bd.get('mem', 0) * 100 // total_chars}%" if total_chars > 0 else "N/A"
+            mem_pct = (
+                f"{bd.get('mem', 0) * 100 // total_chars}%"
+                if total_chars > 0
+                else "N/A"
+            )
             L.append(
                 f"| {r['turn']} | {r['prompt']} | {r['completion']} | {r['cached']}"
                 f" | {bd.get('base', 'N/A')} | {bd.get('mem', 'N/A')}"
@@ -360,7 +404,11 @@ def generate_report(
     L.append("| 轮次 | A-Prompt | A-Cached | B-Prompt | B-Cached | Δ(B-A) |")
     L.append("|------|----------|----------|----------|----------|--------|")
     for a, b in zip(a_results, b_results):
-        diff = b["prompt"] - a["prompt"] if a["prompt"] >= 0 and b["prompt"] >= 0 else "N/A"
+        diff = (
+            b["prompt"] - a["prompt"]
+            if a["prompt"] >= 0 and b["prompt"] >= 0
+            else "N/A"
+        )
         diff_str = f"+{diff}" if isinstance(diff, int) and diff > 0 else str(diff)
         L.append(
             f"| {a['turn']} | {a['prompt']} | {a['cached']}"
@@ -378,21 +426,43 @@ def generate_report(
             f"（**+{growth:.1f}%**），平均每轮额外注入 **{avg_delta}** tokens。\n"
         )
 
+    # ── 2.5. 后台调用 Token 统计 ───────────────────────────────────────────────
+    L.append("## 2.5. 后台调用 Token 统计\n")
+    L.append("> 后台调用包括：状态更新(state_update)、闲置演化(idle_evolve)、记忆检索(memory_query)、记忆编码(memory_encode)\n")
+    L.append("| 组别 | 后台 Total | 对话 Total | 后台占比 |")
+    L.append("|------|-----------|-----------|---------|")
+    for grp_lbl, grp_p, grp_bg in [("A", total_a_p, total_a_bg), ("B", total_b_p, total_b_bg)]:
+        bg_pct = grp_bg / (grp_p + grp_bg) * 100 if (grp_p + grp_bg) > 0 else 0
+        L.append(f"| {grp_lbl} | {grp_bg} | {grp_p} | {bg_pct:.1f}% |")
+    L.append("")
+    total_bg = total_a_bg + total_b_bg
+    total_dialogue = total_a_p + total_b_p
+    if total_bg > 0:
+        L.append(
+            f"> 后台调用合计消耗 **{total_bg}** tokens，占总消耗 **{total_bg / (total_bg + total_dialogue) * 100:.1f}%**。\n"
+        )
+
     # ── 3. 与历史基线对比 ──────────────────────────────────────────────────────
     if b_manual_a and b_manual_b:
         L.append("## 3. 与历史基线对比\n")
-        L.append(f"> 历史基线来自 `{baseline.get('manual_test_date', '?')}` 手动测试。\n")
+        L.append(
+            f"> 历史基线来自 `{baseline.get('manual_test_date', '?')}` 手动测试。\n"
+        )
         L.append("| 指标 | 历史基线 | 本次测试 | 变化 |")
         L.append("|------|---------|---------|------|")
-        delta_a  = total_a_p - b_manual_a
-        delta_b  = total_b_p - b_manual_b
-        pct_a    = delta_a / b_manual_a * 100 if b_manual_a else 0
-        pct_b    = delta_b / b_manual_b * 100 if b_manual_b else 0
+        delta_a = total_a_p - b_manual_a
+        delta_b = total_b_p - b_manual_b
+        pct_a = delta_a / b_manual_a * 100 if b_manual_a else 0
+        pct_b = delta_b / b_manual_b * 100 if b_manual_b else 0
         hist_growth = (b_manual_b - b_manual_a) / b_manual_a * 100 if b_manual_a else 0
-        arrow_a  = "↑" if delta_a > 0 else "↓"
-        arrow_b  = "↑" if delta_b > 0 else "↓"
-        L.append(f"| A 组总 Prompt | {b_manual_a} | {total_a_p} | {arrow_a} {abs(delta_a)} ({abs(pct_a):.1f}%) |")
-        L.append(f"| B 组总 Prompt | {b_manual_b} | {total_b_p} | {arrow_b} {abs(delta_b)} ({abs(pct_b):.1f}%) |")
+        arrow_a = "↑" if delta_a > 0 else "↓"
+        arrow_b = "↑" if delta_b > 0 else "↓"
+        L.append(
+            f"| A 组总 Prompt | {b_manual_a} | {total_a_p} | {arrow_a} {abs(delta_a)} ({abs(pct_a):.1f}%) |"
+        )
+        L.append(
+            f"| B 组总 Prompt | {b_manual_b} | {total_b_p} | {arrow_b} {abs(delta_b)} ({abs(pct_b):.1f}%) |"
+        )
         L.append(f"| B/A 增长率 | {hist_growth:.1f}% | {growth:.1f}% | - |")
         L.append("")
         if delta_a < 0:
@@ -440,10 +510,9 @@ def generate_report(
             )
 
     # ── 5. 记忆 ROI 评估 ───────────────────────────────────────────────────────
-    roi_rows = (
-        [(r, "A") for r in a_results if "roi" in r]
-        + [(r, "B") for r in b_results if "roi" in r]
-    )
+    roi_rows = [(r, "A") for r in a_results if "roi" in r] + [
+        (r, "B") for r in b_results if "roi" in r
+    ]
     if roi_rows:
         L.append("## 5. 记忆 ROI 评估\n")
         L.append("| 轮次 | 组别 | 检查关键词 | 命中 | ROI 分数 |")
@@ -465,7 +534,9 @@ def generate_report(
         L.append("| 轮次 | Prompt | Completion | CachedHit |")
         L.append("|------|--------|------------|-----------|")
         for r in stress_results:
-            L.append(f"| {r['turn']} | {r['prompt']} | {r['completion']} | {r['cached']} |")
+            L.append(
+                f"| {r['turn']} | {r['prompt']} | {r['completion']} | {r['cached']} |"
+            )
         prompts = [r["prompt"] for r in stress_results if r.get("prompt", -1) > 0]
         if len(prompts) >= 5:
             last5_avg = sum(prompts[-5:]) / 5
@@ -480,10 +551,18 @@ def generate_report(
     L.append("## 7. 已启用 Token 优化措施\n")
     L.append("| 措施 | 状态 | 描述 |")
     L.append("|------|------|------|")
-    L.append("| Short-term 剥除 `<thought>` 标签 | ✅ 已启用 | assistant 消息存入前移除内心独白，避免历史重复传输 |")
-    L.append("| Memory 检索结果字段截断 | ✅ 已启用 | episodic content≤200字, insight≤100字, graph bio≤80字 |")
-    L.append("| 语境探照灯碎片选取 | ✅ 已启用 | graph 实体字段按关键词相关性选取最多 3 条碎片 |")
-    L.append("| Explicit Cache (system prompt) | ✅ 已启用 | 5min TTL，cached token 费率约为正常 10% |")
+    L.append(
+        "| Short-term 剥除 `<thought>` 标签 | ✅ 已启用 | assistant 消息存入前移除内心独白，避免历史重复传输 |"
+    )
+    L.append(
+        "| Memory 检索结果字段截断 | ✅ 已启用 | episodic content≤200字, insight≤100字, graph bio≤80字 |"
+    )
+    L.append(
+        "| 语境探照灯碎片选取 | ✅ 已启用 | graph 实体字段按关键词相关性选取最多 3 条碎片 |"
+    )
+    L.append(
+        "| Explicit Cache (system prompt) | ✅ 已启用 | 5min TTL，cached token 费率约为正常 10% |"
+    )
     L.append("")
     if b_manual_a and total_a_p > 0:
         saved = b_manual_a - total_a_p
@@ -501,15 +580,18 @@ def generate_report(
 
 # ── 终端汇总表 ─────────────────────────────────────────────────────────────────
 
+
 def print_summary_table(a_results: list, b_results: list):
     total_a = sum(r.get("prompt", 0) for r in a_results if r.get("prompt", -1) >= 0)
     total_b = sum(r.get("prompt", 0) for r in b_results if r.get("prompt", -1) >= 0)
-    growth  = (total_b - total_a) / total_a * 100 if total_a > 0 else 0
+    growth = (total_b - total_a) / total_a * 100 if total_a > 0 else 0
 
     print("\n" + "=" * 72)
     print("对比汇总")
     print("=" * 72)
-    print(f"{'轮次':<5} {'A-Prompt':>10} {'A-Cached':>10} {'B-Prompt':>10} {'B-Cached':>10} {'Δ(B-A)':>8}")
+    print(
+        f"{'轮次':<5} {'A-Prompt':>10} {'A-Cached':>10} {'B-Prompt':>10} {'B-Cached':>10} {'Δ(B-A)':>8}"
+    )
     print("-" * 72)
     for a, b in zip(a_results, b_results):
         diff = b["prompt"] - a["prompt"] if a["prompt"] >= 0 else 0
@@ -535,15 +617,22 @@ def print_summary_table(a_results: list, b_results: list):
 
 # ── 主流程 ─────────────────────────────────────────────────────────────────────
 
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     parser = argparse.ArgumentParser(description="Ember Benchmark Runner")
-    parser.add_argument("--stress",      action="store_true", help="强制开启压力测试（覆盖 utils/test_config.json）")
-    parser.add_argument("--stress-turns", type=int, default=None, help="压力测试轮数（覆盖配置）")
-    parser.add_argument("--no-latency",  action="store_true", help="关闭延迟记录")
-    parser.add_argument("--skip-b",      action="store_true", help="只跑 A 组（跳过 B 组）")
+    parser.add_argument(
+        "--stress",
+        action="store_true",
+        help="强制开启压力测试（覆盖 utils/test_config.json）",
+    )
+    parser.add_argument(
+        "--stress-turns", type=int, default=None, help="压力测试轮数（覆盖配置）"
+    )
+    parser.add_argument("--no-latency", action="store_true", help="关闭延迟记录")
+    parser.add_argument("--skip-b", action="store_true", help="只跑 A 组（跳过 B 组）")
     args = parser.parse_args()
 
     print("\nEmber Benchmark Runner v1.0")
@@ -591,6 +680,7 @@ def main():
     time.sleep(1)
 
     from config.settings import settings
+
     print(f"  [验证] LLM_TEMPERATURE = {settings.LLM_TEMPERATURE}")
 
     # ── 步骤 4: A 组 ──
@@ -631,7 +721,9 @@ def main():
     if b_results:
         print_summary_table(a_results, b_results)
     else:
-        print(f"\nA 组合计 Prompt: {sum(r.get('prompt', 0) for r in a_results if r.get('prompt', -1) >= 0)} tokens")
+        print(
+            f"\nA 组合计 Prompt: {sum(r.get('prompt', 0) for r in a_results if r.get('prompt', -1) >= 0)} tokens"
+        )
 
     # ── 生成 Markdown 报告 ──
     print("\n[报告] 生成 Markdown 报告...")

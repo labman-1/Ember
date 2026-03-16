@@ -40,9 +40,9 @@ class Brain:
     def _on_idle_speak(self, event: Event):
         def _speak():
             with self.lock:
-                dynamic_prompt = settings.SYSTEM_PROMPT
-                self.memory.update_base_prompt(dynamic_prompt)
-            self._llm_speak(self.memory, pack=True)
+                # 保持 System Prompt 静态
+                self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
+            self._llm_speak(self.memory, pack=True, memories="")
 
         thread = threading.Thread(target=_speak)
         thread.start()
@@ -62,20 +62,18 @@ class Brain:
                 "history:" + history,
                 "state:" + state,
             ]
-            road_result = self.hippocampus.road_memory(messages)
-            memories = json.dumps(road_result, ensure_ascii=False) if road_result else ""
-            dynamic_prompt = settings.SYSTEM_PROMPT
-            if memories:
-                dynamic_prompt += f"\n\n[脑海闪现的记忆]：{memories}"
+            road_result = self.hippocampus.load_memory(messages)
+            memories = (
+                json.dumps(road_result, ensure_ascii=False) if road_result else ""
+            )
+            # 保持 System Prompt 静态，不再拼接动态内容
+            self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
 
-            self.memory.update_base_prompt(dynamic_prompt)
-
-            self._llm_speak(self.memory, pack=True)
+            self._llm_speak(self.memory, pack=True, memories=memories)
         finally:
             self._is_processing = False
 
-    def _llm_speak(self, memory, pack: bool = False):
-        """LLM 对话生成，带超时和错误处理"""
+    def _llm_speak(self, memory, pack: bool = False, memories: str = ""):
         import concurrent.futures
 
         # 在锁外准备数据，减少锁持有时间
@@ -89,11 +87,14 @@ class Brain:
             formatted_history = ""
             for msg in history:
                 role_label = (
-                    "对方"
-                    if msg["role"] == "user"
-                    else f"{settings.CHARACTER_NAME}"
+                    "对方" if msg["role"] == "user" else f"{settings.CHARACTER_NAME}"
                 )
                 formatted_history += f"{role_label}: {msg['content']}\n"
+
+            # 构建动态内容部分（放入 user message，保持 system 静态以提高缓存命中率）
+            dynamic_context = ""
+            if memories:
+                dynamic_context = f"\n\n[脑海闪现的记忆]：\n{memories}\n"
 
             state_injection = self.state_manager.prompt_injection
             base_len = len(settings.SYSTEM_PROMPT)
@@ -102,12 +103,14 @@ class Brain:
                 f"[Prompt Breakdown] base={base_len} mem={mem_len}"
                 f" history={len(formatted_history)} state={len(state_injection)}"
             )
+
+            user_content = f"""以下是对话历史：
+{formatted_history}{dynamic_context}{state_injection}
+现在的时间是{self.event_bus.formatted_logical_now}，请参考并结合状态生成你将要说的下一句话"""
+
             messages = [
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": f"以下是对话历史：\n{formatted_history}\n{state_injection}请参考并结合状态生成回复",
-                },
+                {"role": "user", "content": user_content},
             ]
         else:
             messages = data

@@ -23,12 +23,24 @@ class LLMClient:
         )
 
     def _extract_json(self, content):
-        good_json_string = repair_json(content)
-        data = json.loads(good_json_string)
-        return data
+        if not content or not content.strip():
+            logger.warning("LLM 返回空内容，无法解析 JSON")
+            return None
+        try:
+            good_json_string = repair_json(content)
+            data = json.loads(good_json_string)
+            return data
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(
+                f"JSON 解析失败: {e}, 原始内容: {content[:200] if content else 'None'}..."
+            )
+            return None
 
-    def _log_usage(self, usage, model_name: str):
-        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息"""
+    def _log_usage(self, usage, model_name: str, call_type: str = "dialogue"):
+        """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息和调用类型
+        
+        call_type: dialogue(对话) | state_update(状态更新) | idle_evolve(闲置演化) | memory_query(记忆检索) | memory_encode(记忆编码)
+        """
         if usage is None:
             logger.debug("[LLM Usage] usage 为空")
             return
@@ -63,8 +75,9 @@ class LLMClient:
         cache_creation_tokens = 0
         cache_creation = getattr(usage, "cache_creation", None)
         if cache_creation:
-            created = getattr(cache_creation, "ephemeral_5m_input_tokens", None) or \
-                      getattr(cache_creation, "cache_creation_input_tokens", None)
+            created = getattr(
+                cache_creation, "ephemeral_5m_input_tokens", None
+            ) or getattr(cache_creation, "cache_creation_input_tokens", None)
             try:
                 cache_creation_tokens = int(created) if created else 0
             except (TypeError, ValueError):
@@ -78,11 +91,14 @@ class LLMClient:
             cache_info += f" | CacheCreated: {cache_creation_tokens}"
 
         logger.info(
-            f"[LLM Usage] Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
+            f"[LLM Usage] Type: {call_type} | Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
         )
 
-    def one_chat(self, model_config, messages, timeout=30):
-        """单次对话，带超时和重试"""
+    def one_chat(self, model_config, messages, timeout=60, call_type: str = "state_update"):
+        """单次对话，带超时和重试
+        
+        call_type: 用于区分调用来源，默认 state_update（非对话类调用）
+        """
         client = (
             self.large_client
             if model_config == settings.LARGE_LLM
@@ -101,16 +117,24 @@ class LLMClient:
                     timeout=timeout,
                 )
                 full_response = response.choices[0].message.content
-                usage = getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
-                self._log_usage(usage, model_config.name)
+                usage = getattr(response, "usage", None) or getattr(
+                    response, "usage_metadata", None
+                )
+                self._log_usage(usage, model_config.name, call_type)
                 return full_response
             except Exception as e:
-                logger.error(f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(
+                    f"OneChat Error (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 if attempt == max_retries - 1:
                     return None
         return None
 
-    def stream_chat(self, model_config, messages):
+    def stream_chat(self, model_config, messages, call_type: str = "dialogue"):
+        """流式对话
+        
+        call_type: 用于区分调用来源，默认 dialogue（对话类调用）
+        """
         client = (
             self.large_client
             if model_config == settings.LARGE_LLM
@@ -144,8 +168,12 @@ class LLMClient:
                 if content is not None:
                     yield content
 
-            usage = last_usage or getattr(response, "usage", None) or getattr(response, "usage_metadata", None)
-            self._log_usage(usage, model_config.name)
+            usage = (
+                last_usage
+                or getattr(response, "usage", None)
+                or getattr(response, "usage_metadata", None)
+            )
+            self._log_usage(usage, model_config.name, call_type)
 
         except Exception as e:
             yield f"[Error]: {str(e)}"

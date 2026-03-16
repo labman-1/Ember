@@ -51,6 +51,7 @@ class Hippocampus:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            call_type="memory_encode",
         )
 
         if resp is None:
@@ -72,19 +73,23 @@ class Hippocampus:
                 f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}"
             )
 
-    def road_memory(self, content):
-        system_prompt = settings.CORE_PERSONA + settings.MEMORY_JUDGE_PROMPT
+    def load_memory(self, content):
+        system_prompt = settings.CORE_PERSONA + "\n" + settings.MEMORY_JUDGE_PROMPT
         logger.info(f"Loading Memory\n")
         user_prompt = f"提供的日志如下：\n\n{content}"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        resp = self.llm_client.one_chat(settings.SMALL_LLM, messages=messages)
+        resp = self.llm_client.one_chat(
+            settings.SMALL_LLM, messages=messages, call_type="memory_query"
+        )
 
         # 检查 LLM 响应是否为空
         if resp is None:
-            logger.error("LLM returned no response during memory loading (resp is None)")
+            logger.error(
+                "LLM returned no response during memory loading (resp is None)"
+            )
             return []
 
         key_words = []
@@ -136,9 +141,7 @@ class Hippocampus:
             )
             logger.info(f"Retrieved memory: {len(simplified_memories)} items")
             if graph_context["entities"]:
-                logger.info(
-                    f"Graph entities: {[e.get('name') for e in graph_context['entities']]}"
-                )
+                logger.info(f"Graph entities: {list(graph_context['entities'].keys())}")
 
             return memories
 
@@ -167,40 +170,58 @@ class Hippocampus:
             return {"entities": [], "relations": []}
 
     def _simplify_memories(self, memories):
-        simplified = []
+        """压缩记忆格式：每条记忆一行，减少 JSON 语法开销
+        格式：[时间] 内容
+        """
+        lines = []
         for mem in memories:
-            content = mem.get("content", "")
-            insight = mem.get("insight", "")
-            simplified.append(
-                {
-                    "content": content[:200] if len(content) > 200 else content,
-                    "insight": insight[:100] if len(insight) > 100 else insight,
-                    "time": mem.get("time", ""),
-                }
-            )
-        return simplified
+            content = mem.get("content", "")[:180]
+            time = mem.get("time", "")[:10]  # 只取日期
+            lines.append(f"[{time}] {content}")
+        return lines
 
-    def _simplify_graph(self, graph_context: dict, query: str = "", key_words: list = None) -> dict:
+    def _simplify_graph(
+        self, graph_context: dict, query: str = "", key_words: list = None
+    ) -> dict:
         """语境探照灯：为每个实体的碎片字段智能选取最相关片段
 
-        - List<String> 碎片字段：锚点保留 + 语境匹配 + 最新兜底，合成为字符串
-        - 旧格式 String 字段（兼容）：截断至 80 字
+        返回压缩格式：
+        - entities: {"名字": "bio内容", ...}  # 只保留有描述字段的
+        - relations: ["A 关系 B", ...]  # 紧凑关系字符串
         """
-        entities = []
+        entities = {}
         kws = key_words or []
         for e in graph_context.get("entities", []):
-            entry = dict(e)
+            name = e.get("name", "")
+            if not name:
+                continue
+            # 提取描述字段
+            desc_parts = []
             for field in ("bio", "vibe", "utility", "significance"):
-                val = entry.get(field)
+                val = e.get(field)
                 if isinstance(val, list):
                     selected = self._select_relevant_fragments(val, query, kws)
-                    entry[field] = "; ".join(selected)
-                elif isinstance(val, str) and len(val) > 80:
-                    entry[field] = val[:80]
-            entities.append(entry)
-        return {"entities": entities, "relations": graph_context.get("relations", [])}
+                    if selected:
+                        desc_parts.append("; ".join(selected)[:100])
+                elif isinstance(val, str) and val:
+                    desc_parts.append(val[:80])
+            if desc_parts:
+                entities[name] = " | ".join(desc_parts)
 
-    def _select_relevant_fragments(self, fragments: list, query: str, key_words: list) -> list:
+        # 压缩关系格式："A 关系 B"
+        relations = []
+        for r in graph_context.get("relations", []):
+            src = r.get("source", "")
+            tgt = r.get("target", "")
+            rel = r.get("relation", "")
+            if src and tgt and rel:
+                relations.append(f"{src} {rel} {tgt}")
+
+        return {"entities": entities, "relations": relations}
+
+    def _select_relevant_fragments(
+        self, fragments: list, query: str, key_words: list
+    ) -> list:
         """从碎片列表选出最相关的片段
 
         策略：
