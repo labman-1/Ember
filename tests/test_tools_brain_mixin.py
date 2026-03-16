@@ -131,7 +131,7 @@ class TestToolEnabledBrain:
         enhanced = brain_mixin_with_tools.build_system_prompt_with_tools(base_prompt)
 
         assert base_prompt in enhanced
-        assert "你可以使用以下工具" in enhanced
+        assert "【可用工具】" in enhanced
         assert "time_tool" in enhanced
 
     def test_build_system_prompt_without_tools(self, brain_mixin):

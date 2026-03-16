@@ -99,7 +99,7 @@ class TestToolSelector:
         selector = ToolSelector()
         available = ["time_tool", "remember_tool"]
 
-        selected = selector.select_tools("今天天气不错", available, min_relevance=0.5)
+        selected = selector.select_tools("哈哈，真有意思", available, min_relevance=0.5)
         assert len(selected) == 0
 
     def test_max_tools_limit(self):
