@@ -119,7 +119,7 @@ class StateManager:
         del data["近期综合轨迹"]
         self._async_log(
             "./config/chat_history.log",
-            f"{{状态更新: {json.dumps(data, ensure_ascii=False)}}}",
+            f"{self.state_zip}",
         )
 
         self.event_bus.publish(Event("state.update", data={"new_state": new_state}))
@@ -262,8 +262,26 @@ class StateManager:
 
     @property
     def prompt_injection(self):
-        state_text = json.dumps(self.current_state, ensure_ascii=False, indent=2)
-        return f"\n\n###依鸣的前一时刻状态###\n{state_text}\n\n"
+        return f"\n\n【前一时刻状态】\n{self.state_zip_full}\n\n"
+
+    @property
+    def state_zip_full(self):
+        s = self.current_state
+        line = s.get("近期综合轨迹", "")
+        return f"{self.state_zip}\n近期综合轨迹:{line}\n"
+
+    @property
+    def state_zip(self):
+        """压缩状态注入：完整保留字段，用紧凑格式节省 token"""
+        s = self.current_state
+        time_str = s.get("对应时间", "")
+        pad = f"P{s.get('P',5)} A{s.get('A',5)} D{s.get('D',5)}"
+        situation = s.get("客观情境", "")
+        inner = s.get("内心活动", "")
+        goal = s.get("近期目标", "")
+
+        # 紧凑格式，完整保留内容
+        return f"\n[状态 {time_str} | {pad}]\n情境:{situation}\n内心:{inner}\n目标:{goal}\n"
 
     @property
     def speaking_prompt_injection(self):

@@ -105,7 +105,7 @@ class Brain:
             )
 
             user_content = f"""以下是对话历史：
-{formatted_history}{state_injection}{dynamic_context}
+{formatted_history}{dynamic_context}{state_injection}
 现在的时间是{self.event_bus.formatted_logical_now}，请参考并结合状态生成你将要说的下一句话"""
 
             messages = [

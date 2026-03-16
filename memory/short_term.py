@@ -5,6 +5,7 @@ import re
 import copy
 from concurrent.futures import ThreadPoolExecutor
 from brain.tag_utils import extract_thought_and_speech
+from config.settings import settings
 
 
 def separate_thought_and_speech(text):
@@ -71,14 +72,19 @@ class ShortTermMemory:
         self._executor.submit(_log)
 
     def add_message(self, role, content):
-        # 日志写全文（含 thought），供记忆编码器使用
-        self.async_log("./config/chat_history.log", f"{role}: {content}")
-        # assistant 消息剥除 <thought> 再存入上下文窗口，避免反复发送内心独白
         if role == "assistant":
             _, speech = separate_thought_and_speech(content)
             self._add_back(role, speech)
+            self.async_log(
+                "./config/chat_history.log",
+                f"\n{settings.CHARACTER_NAME}: {speech}\n",
+            )
         else:
             self._add_back(role, content)
+            self.async_log(
+                "./config/chat_history.log",
+                f"\n{role}: {content}\n",
+            )
         self._save_memory()
 
     def _save_memory(self):
