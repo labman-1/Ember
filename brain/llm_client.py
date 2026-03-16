@@ -107,7 +107,7 @@ class LLMClient:
                     messages=messages,
                     extra_body={"enable_thinking": False},
                     stream=False,
-                    temperature=0.7,
+                    temperature=settings.LLM_TEMPERATURE,
                     timeout=timeout,
                 )
                 full_response = response.choices[0].message.content
@@ -138,7 +138,7 @@ class LLMClient:
                 extra_body={"enable_thinking": False},
                 stream=True,
                 stream_options={"include_usage": True},
-                temperature=0.7,
+                temperature=settings.LLM_TEMPERATURE,
             )
 
             last_usage = None
