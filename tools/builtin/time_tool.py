@@ -103,6 +103,9 @@ class TimeTool(BaseTool):
             else:
                 # 尝试解析时区字符串（简化处理）
                 tz = self._parse_timezone(timezone_str)
+                # 如果解析失败，回退到本地时间并归一化时区字符串
+                if tz is None:
+                    timezone_str = "local"
 
             # 转换为 datetime
             if tz:

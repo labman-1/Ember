@@ -13,7 +13,7 @@ from tools.base import ToolResult
 from tools.registry import ToolRegistry
 from tools.executor import ToolExecutor
 from tools.selector import ToolSelector, get_tool_selector
-from tools.intent import ToolIntentRecognizer, get_intent_recognizer
+from tools.intent import ToolIntentRecognizer, get_intent_recognizer, ToolIntent
 from tools.builtin.time_tool import TimeTool
 from tools.builtin.file_tool import FileTool
 from tools.builtin.note_tool import NoteTool
@@ -85,9 +85,9 @@ class ToolEnabledBrain:
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
 
-        # 动态工具选择
+        # 动态工具选择（创建独立实例，避免全局单例的线程安全问题）
         self.enable_dynamic_selection = enable_dynamic_selection
-        self.tool_selector = get_tool_selector() if enable_dynamic_selection else None
+        self.tool_selector = ToolSelector() if enable_dynamic_selection else None
 
         # 意图识别
         self.enable_intent_recognition = enable_intent_recognition
@@ -96,6 +96,7 @@ class ToolEnabledBrain:
         # 工具调用统计
         self._tool_call_count = 0
         self._tool_results_buffer: list[dict] = []
+        self._selected_tools_for_current_turn: Optional[List[str]] = None  # 动态选择的工具
 
         # 如果启用默认工具，注册它们
         if enable_default_tools:
@@ -169,20 +170,20 @@ class ToolEnabledBrain:
             intent_result = self.intent_recognizer.recognize(user_message)
             logger.debug(f"工具意图识别: {intent_result.intent.name}, 置信度={intent_result.confidence:.2f}")
 
-            if intent_result.intent.value == 1:  # NO_TOOL_NEEDED
+            if intent_result.intent == ToolIntent.NO_TOOL_NEEDED:
                 # 不需要工具，跳过工具处理
                 return base_process_func(user_message)
 
         # 动态工具选择：确定要注入哪些工具说明
-        selected_tools = None
+        self._selected_tools_for_current_turn = None
         if self.enable_dynamic_selection and self.tool_selector:
             available_tools = self.tool_registry.list_tools()
-            selected_tools = self.tool_selector.select_tools(
+            self._selected_tools_for_current_turn = self.tool_selector.select_tools(
                 user_message,
                 available_tools,
                 max_tools=3
             )
-            logger.debug(f"动态工具选择: 选中={selected_tools}")
+            logger.debug(f"动态工具选择: 选中={self._selected_tools_for_current_turn}")
 
         # 正常处理流程，但注入工具说明
         return base_process_func(user_message)
@@ -401,13 +402,17 @@ class ToolEnabledBrain:
         Args:
             base_prompt: 基础 system prompt
             compact: 是否使用精简描述（节省token）
-            selected_tools: 要包含的工具名称列表，None表示全部
+            selected_tools: 要包含的工具名称列表，None表示使用动态选择的工具
 
         Returns:
             增强后的 system prompt
         """
         if len(self.tool_registry) == 0:
             return base_prompt
+
+        # 如果没有指定工具列表，使用动态选择的工具
+        if selected_tools is None and self._selected_tools_for_current_turn is not None:
+            selected_tools = self._selected_tools_for_current_turn
 
         tool_guidelines = self.tool_registry.get_tools_description_for_prompt(
             compact=compact,

@@ -182,13 +182,51 @@ tags: {json.dumps(tags, ensure_ascii=False)}
         else:
             return result
 
+    def _sanitize_note_id(self, note_id: str) -> str:
+        """
+        清理和校验笔记ID
+
+        - 移危险字符
+        - 确保.md后缀
+        - 防止路径遍历
+        """
+        if not note_id:
+            return ""
+        # 清理文件名：只允许字母数字、下划线、连字符、点
+        note_id = re.sub(r'[^\w\-_.]', '_', note_id)
+        if not note_id.endswith('.md'):
+            note_id += '.md'
+        return note_id
+
+    def _resolve_safe_path(self, note_id: str) -> tuple[Optional[Path], Optional[str]]:
+        """
+        解析并验证安全路径
+
+        Returns:
+            (path, error_msg) - 如果error_msg不为空，则路径不安全
+        """
+        safe_note_id = self._sanitize_note_id(note_id)
+        if not safe_note_id:
+            return None, "笔记ID不能为空"
+
+        file_path = (self.notes_dir / safe_note_id).resolve()
+
+        # 路径遍历检查：确保解析后的路径仍在notes_dir内
+        try:
+            file_path.relative_to(self.notes_dir.resolve())
+        except ValueError:
+            return None, f"非法路径: {note_id}"
+
+        return file_path, None
+
     def _read_note(self, params: dict) -> ToolResult:
         """读取笔记"""
         note_id = params.get("note_id", "")
-        if not note_id.endswith('.md'):
-            note_id += '.md'
 
-        file_path = self.notes_dir / note_id
+        file_path, error = self._resolve_safe_path(note_id)
+        if error:
+            return ToolResult.fail(error, security_blocked=True)
+
         result = self._file_tool._read_file(file_path, "utf-8")
 
         if not result.success:
@@ -301,10 +339,9 @@ tags: {json.dumps(tags, ensure_ascii=False)}
         if not note_id:
             return ToolResult.fail("必须指定笔记ID")
 
-        if not note_id.endswith('.md'):
-            note_id += '.md'
-
-        file_path = self.notes_dir / note_id
+        file_path, error = self._resolve_safe_path(note_id)
+        if error:
+            return ToolResult.fail(error, security_blocked=True)
 
         if not file_path.exists():
             return ToolResult.fail(f"笔记不存在: {note_id}", not_found=True)
@@ -312,7 +349,7 @@ tags: {json.dumps(tags, ensure_ascii=False)}
         try:
             file_path.unlink()
             return ToolResult.ok(
-                data={"deleted": note_id},
+                data={"deleted": file_path.name},
                 message="笔记已删除"
             )
         except Exception as e:

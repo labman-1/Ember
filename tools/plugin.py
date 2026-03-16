@@ -5,6 +5,7 @@
 实现插件化架构，工具定义在单一文件，自动注册。
 """
 import importlib
+import importlib.util
 import inspect
 import logging
 import sys
@@ -78,11 +79,6 @@ class ToolPluginManager:
             logger.debug(f"插件目录不存在: {self.plugin_dir}")
             return tools
 
-        # 添加插件目录到 Python 路径
-        parent_dir = str(self.plugin_dir.parent)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-
         for py_file in self.plugin_dir.glob(self.TOOL_FILE_PATTERN):
             try:
                 module_tools = self._load_tools_from_file(py_file)
@@ -95,7 +91,7 @@ class ToolPluginManager:
 
     def _load_tools_from_file(self, py_file: Path) -> List[Type[BaseTool]]:
         """
-        从单个 Python 文件加载工具类
+        从单个 Python 文件加载工具类（使用 importlib.util 避免 sys.path 污染）
 
         Args:
             py_file: Python 文件路径
@@ -110,12 +106,19 @@ class ToolPluginManager:
         module_name = str(module_path.with_suffix("")).replace("\\", ".").replace("/", ".")
 
         try:
-            # 导入模块
+            # 使用 importlib.util 从文件路径加载模块（不污染 sys.path）
             if module_name in sys.modules:
+                # 热重载：重新加载已存在的模块
                 module = sys.modules[module_name]
-                importlib.reload(module)  # 热重载支持
+                importlib.reload(module)
             else:
-                module = importlib.import_module(module_name)
+                # 从文件路径加载新模块
+                spec = importlib.util.spec_from_file_location(module_name, py_file)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"无法加载模块: {py_file}")
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module  # 注册到 sys.modules 以便相对导入
+                spec.loader.exec_module(module)
 
             # 查找 BaseTool 子类
             for name, obj in inspect.getmembers(module):

@@ -5,6 +5,7 @@
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import json
 from enum import Enum, auto
 from typing import Any, Optional
 import logging
@@ -87,12 +88,12 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     short_description: str = ""  # 精简描述（20字以内，用于prompt）
-    parameters: dict = field(default_factory=dict)
+    parameters: dict = None  # 在__init__中初始化，避免可变默认值问题
     permission: ToolPermission = ToolPermission.READONLY
     timeout: float = 30.0
     version: str = "1.0.0"  # 语义化版本
     deprecated: bool = False  # 是否已弃用
-    examples: list = field(default_factory=list)  # 使用示例
+    examples: list = None  # 在__init__中初始化，避免可变默认值问题
 
     def __init__(self):
         """初始化工具，子类可覆盖添加额外设置"""
@@ -100,6 +101,15 @@ class BaseTool(ABC):
             raise ValueError(f"{self.__class__.__name__} 必须设置 name 属性")
         if not self.description:
             raise ValueError(f"{self.__class__.__name__} 必须设置 description 属性")
+
+        # 初始化可变默认值（避免类属性共享）
+        if self.parameters is None:
+            self.parameters = {
+                "type": "object",
+                "properties": {},
+            }
+        if self.examples is None:
+            self.examples = []
 
         # 确保 parameters 符合 JSON Schema 基本结构
         if not self.parameters:
@@ -236,8 +246,9 @@ class BaseTool(ABC):
         for ex in self.examples[:2]:  # 最多展示2个示例
             user_msg = ex.get("user", "")
             params = ex.get("parameters", {})
+            params_json = json.dumps(params, ensure_ascii=False)
             lines.append(f'    用户: {user_msg}')
-            lines.append(f'    调用: <tool_call>{{"name": "{self.name}", "parameters": {params}}}</tool_call>')
+            lines.append(f'    调用: <tool_call>{{"name": "{self.name}", "parameters": {params_json}}}</tool_call>')
 
         return "\n".join(lines)
 
@@ -291,9 +302,6 @@ class BaseTool(ABC):
     def get_full_identifier(self) -> str:
         """返回带版本的完整标识"""
         return f"{self.name}@v{self.version}"
-
-    def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}(name='{self.name}', permission={self.permission.name})>"
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(name='{self.name}', permission={self.permission.name})>"
