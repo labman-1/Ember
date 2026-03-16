@@ -106,5 +106,8 @@ class Settings:
     MEMORY_DECENT_FACTOR = float(os.getenv("MEMORY_DECENT_FACTOR", "0.5"))
     RECALL_TOP_K = int(os.getenv("RECALL_TOP_K", "10"))
 
+    # LLM generation temperature; overridable via env for benchmark/determinism
+    LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+
 
 settings = Settings()

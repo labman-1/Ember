@@ -165,6 +165,34 @@ START_TIME=?
 
 ---
 
+## 🔬 性能基准测试
+
+`utils/benchmark_runner.py` 是自动化 A/B Token 消耗基准测试工具，读取 `test_script.json` 固定脚本，控制温度为 0 消除随机性，输出逐轮归因分析报告。
+
+```bash
+# 标准 A/B 测试 + Markdown 报告
+python utils/benchmark_runner.py
+
+# 只跑 A 组（不重置记忆跑 B）
+python utils/benchmark_runner.py --skip-b
+
+# 压力测试（50轮，寻找 Token 增长天花板）
+python utils/benchmark_runner.py --stress --stress-turns 50
+
+# 不统计延迟（加快测试速度）
+python utils/benchmark_runner.py --no-latency
+```
+
+输出文件：`benchmark_report_[timestamp].md`，包含：
+- 每轮 Token 分布（base/mem/history/state 归因）
+- A/B 组对比 + 历史基线 delta
+- TTFT 延迟分布表
+- 记忆关键词 ROI 评估
+
+相关配置文件：`test_script.json`（对话脚本）、`test_config.json`（功能开关与历史基线）。
+
+---
+
 ## 📈 未来规划 (Roadmap)
 - [ ] **我有一个梦**: 在睡眠（逻辑时间深夜）时，自发对当日记忆进行深度总结与价值观修正。
 - [x] **社交图谱 (Neo4j)**: ✅ 已完成。建立了依鸣对不同用户、地点、事件的认知关系链，支持实体提取与知识图谱存储。

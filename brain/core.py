@@ -95,11 +95,18 @@ class Brain:
                 )
                 formatted_history += f"{role_label}: {msg['content']}\n"
 
+            state_injection = self.state_manager.prompt_injection
+            base_len = len(settings.SYSTEM_PROMPT)
+            mem_len = max(0, len(system_prompt) - base_len)
+            logger.info(
+                f"[Prompt Breakdown] base={base_len} mem={mem_len}"
+                f" history={len(formatted_history)} state={len(state_injection)}"
+            )
             messages = [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
-                    "content": f"以下是对话历史：\n{formatted_history}\n{self.state_manager.prompt_injection}请参考并结合状态生成回复",
+                    "content": f"以下是对话历史：\n{formatted_history}\n{state_injection}请参考并结合状态生成回复",
                 },
             ]
         else:
