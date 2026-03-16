@@ -8,10 +8,12 @@ import json
 import logging
 import re
 import threading
-from typing import Optional, Any
+from typing import Optional, Any, List
 from tools.base import ToolResult
 from tools.registry import ToolRegistry
 from tools.executor import ToolExecutor
+from tools.selector import ToolSelector, get_tool_selector
+from tools.intent import ToolIntentRecognizer, get_intent_recognizer
 from tools.builtin.time_tool import TimeTool
 from tools.builtin.file_tool import FileTool
 from tools.builtin.note_tool import NoteTool
@@ -35,12 +37,27 @@ class ToolEnabledBrain:
                 ToolEnabledBrain.__init__(self, event_bus)
     """
 
-    # 工具调用标签的正则表达式
-    # 使用非贪婪匹配 .*? 来匹配标签内容，但需要确保找到匹配的闭合标签
-    TOOL_CALL_PATTERN = re.compile(
+    # 工具调用标签的正则表达式 - 支持多种格式
+    # 格式1: OpenAI风格代码块
+    FUNCTION_CALL_PATTERN = re.compile(
+        r'```tool_call\s*\n(.*?)\n```',
+        re.DOTALL | re.IGNORECASE
+    )
+
+    # 格式2: XML标签（严格格式）
+    XML_TOOL_PATTERN = re.compile(
+        r'<tool_call>\s*<name>(.*?)</name>\s*<parameters>(.*?)</parameters>\s*</tool_call>',
+        re.DOTALL | re.IGNORECASE
+    )
+
+    # 格式3: JSON格式（保留现有格式）
+    JSON_TOOL_PATTERN = re.compile(
         r'<tool_call>\s*(\{.*?\})\s*</tool_call>',
         re.DOTALL | re.IGNORECASE
     )
+
+    # 向后兼容：保留原名
+    TOOL_CALL_PATTERN = JSON_TOOL_PATTERN
 
     # 最大单次对话工具调用次数，防止循环
     MAX_TOOL_CALLS_PER_TURN = 3
@@ -50,6 +67,8 @@ class ToolEnabledBrain:
         event_bus: EventBus,
         hippocampus: Optional[Hippocampus] = None,
         enable_default_tools: bool = True,
+        enable_dynamic_selection: bool = True,
+        enable_intent_recognition: bool = True,
     ):
         """
         初始化工具支持
@@ -58,11 +77,21 @@ class ToolEnabledBrain:
             event_bus: 事件总线
             hippocampus: 海马体实例（用于记忆工具）
             enable_default_tools: 是否启用默认工具集
+            enable_dynamic_selection: 是否启用动态工具选择
+            enable_intent_recognition: 是否启用意图识别
         """
         self.event_bus = event_bus
         self.hippocampus = hippocampus
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
+
+        # 动态工具选择
+        self.enable_dynamic_selection = enable_dynamic_selection
+        self.tool_selector = get_tool_selector() if enable_dynamic_selection else None
+
+        # 意图识别
+        self.enable_intent_recognition = enable_intent_recognition
+        self.intent_recognizer = get_intent_recognizer() if enable_intent_recognition else None
 
         # 工具调用统计
         self._tool_call_count = 0
@@ -71,6 +100,7 @@ class ToolEnabledBrain:
         # 如果启用默认工具，注册它们
         if enable_default_tools:
             self._register_default_tools()
+
 
         # 订阅事件
         self.event_bus.subscribe("brain.tool_call", self._on_tool_call)
@@ -88,6 +118,10 @@ class ToolEnabledBrain:
             self.tool_registry.register(RecallCheckTool())
 
         logger.info(f"已注册 {len(self.tool_registry)} 个默认工具")
+
+        # 更新选择器可用工具列表
+        if self.tool_selector:
+            self.tool_selector.set_available_tools(self.tool_registry.list_tools())
 
     def _on_tool_call(self, event: Event):
         """处理显式工具调用事件"""
@@ -111,7 +145,7 @@ class ToolEnabledBrain:
         base_process_func: Any,
     ) -> str:
         """
-        处理带工具支持的对话
+        处理带工具支持的对话（支持意图识别和动态工具选择）
 
         Args:
             user_message: 用户输入
@@ -129,6 +163,26 @@ class ToolEnabledBrain:
         explicit_tool_result = self._check_explicit_tool_command(user_message)
         if explicit_tool_result:
             return explicit_tool_result
+
+        # 意图识别：检查是否需要工具
+        if self.enable_intent_recognition and self.intent_recognizer:
+            intent_result = self.intent_recognizer.recognize(user_message)
+            logger.debug(f"工具意图识别: {intent_result.intent.name}, 置信度={intent_result.confidence:.2f}")
+
+            if intent_result.intent.value == 1:  # NO_TOOL_NEEDED
+                # 不需要工具，跳过工具处理
+                return base_process_func(user_message)
+
+        # 动态工具选择：确定要注入哪些工具说明
+        selected_tools = None
+        if self.enable_dynamic_selection and self.tool_selector:
+            available_tools = self.tool_registry.list_tools()
+            selected_tools = self.tool_selector.select_tools(
+                user_message,
+                available_tools,
+                max_tools=3
+            )
+            logger.debug(f"动态工具选择: 选中={selected_tools}")
 
         # 正常处理流程，但注入工具说明
         return base_process_func(user_message)
@@ -205,7 +259,7 @@ class ToolEnabledBrain:
 
     def extract_tool_calls(self, text: str) -> list[dict]:
         """
-        从文本中提取工具调用
+        从文本中提取工具调用（支持多种格式）
 
         Args:
             text: LLM 输出的文本
@@ -215,7 +269,8 @@ class ToolEnabledBrain:
         """
         calls = []
 
-        for match in self.TOOL_CALL_PATTERN.finditer(text):
+        # 格式1: 尝试代码块格式 ```tool_call
+        for match in self.FUNCTION_CALL_PATTERN.finditer(text):
             try:
                 call_data = json.loads(match.group(1))
                 if "name" in call_data:
@@ -224,13 +279,35 @@ class ToolEnabledBrain:
                         "parameters": call_data.get("parameters", {}),
                     })
             except json.JSONDecodeError as e:
-                logger.warning(f"解析工具调用失败: {e}")
+                logger.debug(f"代码块格式解析失败: {e}")
+
+        # 格式2: 尝试XML格式 <tool_call><name>...</name><parameters>...</parameters></tool_call>
+        for match in self.XML_TOOL_PATTERN.finditer(text):
+            try:
+                name = match.group(1).strip()
+                params_str = match.group(2).strip()
+                params = json.loads(params_str) if params_str else {}
+                calls.append({"name": name, "parameters": params})
+            except json.JSONDecodeError as e:
+                logger.debug(f"XML格式解析失败: {e}")
+
+        # 格式3: 尝试JSON格式 <tool_call>{"name": ..., "parameters": ...}</tool_call>
+        for match in self.JSON_TOOL_PATTERN.finditer(text):
+            try:
+                call_data = json.loads(match.group(1))
+                if "name" in call_data:
+                    calls.append({
+                        "name": call_data["name"],
+                        "parameters": call_data.get("parameters", {}),
+                    })
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON格式解析工具调用失败: {e}")
 
         return calls
 
     def remove_tool_calls(self, text: str) -> str:
         """
-        从文本中移除工具调用标签
+        从文本中移除工具调用标签（支持所有格式）
 
         Args:
             text: 原始文本
@@ -238,7 +315,13 @@ class ToolEnabledBrain:
         Returns:
             清理后的文本
         """
-        return self.TOOL_CALL_PATTERN.sub('', text).strip()
+        # 移除代码块格式
+        text = self.FUNCTION_CALL_PATTERN.sub('', text)
+        # 移除XML格式
+        text = self.XML_TOOL_PATTERN.sub('', text)
+        # 移除JSON格式
+        text = self.JSON_TOOL_PATTERN.sub('', text)
+        return text.strip()
 
     def execute_tool_calls(self, calls: list[dict]) -> list[dict]:
         """
@@ -269,12 +352,13 @@ class ToolEnabledBrain:
 
         return results
 
-    def format_tool_results_for_prompt(self, results: list[dict]) -> str:
+    def format_tool_results_for_prompt(self, results: list[dict], use_summarization: bool = True) -> str:
         """
-        格式化工具结果为 prompt 文本
+        格式化工具结果为 prompt 文本（支持摘要）
 
         Args:
             results: 工具执行结果
+            use_summarization: 是否使用工具自带的摘要方法
 
         Returns:
             格式化后的文本
@@ -289,22 +373,35 @@ class ToolEnabledBrain:
             result = item["result"]
 
             if result.success:
-                data_str = json.dumps(result.data, ensure_ascii=False, default=str)
-                # 限制长度
-                if len(data_str) > 500:
-                    data_str = data_str[:500] + "..."
-                lines.append(f"- {tool_name}: {data_str}")
+                # 尝试使用工具的摘要方法
+                tool = self.tool_registry.get(tool_name)
+                if use_summarization and tool:
+                    summary = tool.summarize_result(result, max_length=200)
+                    lines.append(f"- {tool_name}: {summary}")
+                else:
+                    # 回退到简单JSON序列化（截断）
+                    data_str = json.dumps(result.data, ensure_ascii=False, default=str)
+                    if len(data_str) > 200:
+                        data_str = data_str[:200] + "..."
+                    lines.append(f"- {tool_name}: {data_str}")
             else:
                 lines.append(f"- {tool_name}: 失败 - {result.error}")
 
         return "\n".join(lines)
 
-    def build_system_prompt_with_tools(self, base_prompt: str) -> str:
+    def build_system_prompt_with_tools(
+        self,
+        base_prompt: str,
+        compact: bool = True,
+        selected_tools: Optional[List[str]] = None
+    ) -> str:
         """
-        构建包含工具说明的 system prompt
+        构建包含工具说明的 system prompt（支持精简模式和动态工具选择）
 
         Args:
             base_prompt: 基础 system prompt
+            compact: 是否使用精简描述（节省token）
+            selected_tools: 要包含的工具名称列表，None表示全部
 
         Returns:
             增强后的 system prompt
@@ -312,7 +409,11 @@ class ToolEnabledBrain:
         if len(self.tool_registry) == 0:
             return base_prompt
 
-        tool_guidelines = self.tool_registry.get_tools_description_for_prompt()
+        tool_guidelines = self.tool_registry.get_tools_description_for_prompt(
+            compact=compact,
+            include_examples=True,
+            tool_names=selected_tools
+        )
 
         return f"""{base_prompt}
 
@@ -328,8 +429,16 @@ class ToolEnabledBrain:
 
     def register_tool(self, tool):
         """便捷方法：注册工具"""
-        return self.tool_registry.register(tool)
+        result = self.tool_registry.register(tool)
+        # 同步更新选择器的可用工具列表
+        if result and self.tool_selector:
+            self.tool_selector.set_available_tools(self.tool_registry.list_tools())
+        return result
 
     def unregister_tool(self, name: str):
         """便捷方法：注销工具"""
-        return self.tool_registry.unregister(name)
+        result = self.tool_registry.unregister(name)
+        # 同步更新选择器的可用工具列表
+        if result and self.tool_selector:
+            self.tool_selector.set_available_tools(self.tool_registry.list_tools())
+        return result

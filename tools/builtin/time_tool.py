@@ -22,8 +22,20 @@ class TimeTool(BaseTool):
 
     name = "time_tool"
     description = "获取当前时间信息，支持多种格式和时区转换"
+    short_description = "获取当前时间、日期信息"
     permission = ToolPermission.READONLY
     timeout = 5.0
+
+    examples = [
+        {
+            "user": "现在几点了？",
+            "parameters": {"format": "human"}
+        },
+        {
+            "user": "今天的日期是？",
+            "parameters": {"format": "date"}
+        },
+    ]
 
     parameters = {
         "type": "object",

@@ -31,8 +31,16 @@ class RememberTool(BaseTool):
 
     name = "remember_tool"
     description = "将重要信息显式编码为长期记忆，当用户说'记住'时使用"
+    short_description = "记住重要信息"
     permission = ToolPermission.READWRITE
     timeout = 15.0
+
+    examples = [
+        {
+            "user": "记住我喜欢喝咖啡",
+            "parameters": {"content": "用户喜欢喝咖啡", "importance": 1.0}
+        },
+    ]
 
     parameters = {
         "type": "object",
@@ -154,8 +162,16 @@ class ForgetTool(BaseTool):
 
     name = "forget_tool"
     description = "请求删除特定主题的记忆，当用户说'忘掉'时使用"
+    short_description = "删除特定记忆"
     permission = ToolPermission.DESTRUCTIVE
     timeout = 10.0
+
+    examples = [
+        {
+            "user": "忘掉我之前说的",
+            "parameters": {"topic": "之前说的内容"}
+        },
+    ]
 
     parameters = {
         "type": "object",
@@ -271,8 +287,16 @@ class RecallCheckTool(BaseTool):
 
     name = "recall_check_tool"
     description = "检查是否有某主题的记忆，用于确认记忆是否存在"
+    short_description = "检查记忆是否存在"
     permission = ToolPermission.READONLY
     timeout = 5.0
+
+    examples = [
+        {
+            "user": "我记得你喜欢咖啡对吗？",
+            "parameters": {"topic": "喜欢咖啡"}
+        },
+    ]
 
     parameters = {
         "type": "object",

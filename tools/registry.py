@@ -131,12 +131,21 @@ class ToolRegistry:
         tool = self._tools.get(name)
         return tool.get_schema() if tool else None
 
-    def get_tools_description_for_prompt(self, permission: Optional[ToolPermission] = None) -> str:
+    def get_tools_description_for_prompt(
+        self,
+        permission: Optional[ToolPermission] = None,
+        compact: bool = True,
+        include_examples: bool = True,
+        tool_names: Optional[List[str]] = None,
+    ) -> str:
         """
         生成工具使用说明文本（用于注入 System Prompt）
 
         Args:
             permission: 按权限级别过滤，None 表示不过滤
+            compact: 是否使用精简描述（节省token）
+            include_examples: 是否包含使用示例
+            tool_names: 指定要包含的工具列表，None表示全部
 
         Returns:
             工具说明文本
@@ -144,19 +153,34 @@ class ToolRegistry:
         tools = self._tools.values()
         if permission is not None:
             tools = [t for t in tools if t.permission == permission]
+        if tool_names is not None:
+            tools = [t for t in tools if t.name in tool_names]
 
         if not tools:
             return ""
 
-        lines = ["你可以使用以下工具来增强与用户的交互："]
-        for tool in tools:
-            lines.append(tool.get_tool_description_for_prompt())
+        lines = ["【可用工具】"]
 
-        lines.append("")
-        lines.append("当你需要使用工具时，在回复中包含：")
-        lines.append('<tool_call>{"name": "tool_name", "parameters": {...}}</tool_call>')
-        lines.append("")
-        lines.append("工具结果会出现在下一个上下文窗口中。")
+        for tool in tools:
+            if compact:
+                lines.append(tool.get_compact_prompt_description())
+            else:
+                lines.append(tool.get_tool_description_for_prompt())
+
+        if include_examples:
+            lines.append("")
+            lines.append("【使用示例】")
+            for tool in tools:
+                ex_text = tool.get_examples_text()
+                if ex_text:
+                    lines.append(ex_text)
+
+            # 通用格式说明
+            lines.append("")
+            lines.append("【格式规范】")
+            lines.append('- 工具调用: <tool_call>{"name": "工具名", "parameters": {...}}</tool_call>')
+            lines.append("- 参数必须符合工具要求")
+            lines.append("- 一次对话最多使用3个工具")
 
         return "\n".join(lines)
 

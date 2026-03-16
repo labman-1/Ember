@@ -75,16 +75,24 @@ class BaseTool(ABC):
     Attributes:
         name: 工具唯一标识名（snake_case）
         description: 工具功能描述（用于LLM理解）
+        short_description: 精简描述（20字以内，用于prompt）
         parameters: JSON Schema 格式的参数定义
         permission: 工具权限级别
         timeout: 默认超时时间（秒）
+        version: 语义化版本号
+        deprecated: 是否已弃用
+        examples: 使用示例列表
     """
 
     name: str = ""
     description: str = ""
+    short_description: str = ""  # 精简描述（20字以内，用于prompt）
     parameters: dict = field(default_factory=dict)
     permission: ToolPermission = ToolPermission.READONLY
     timeout: float = 30.0
+    version: str = "1.0.0"  # 语义化版本
+    deprecated: bool = False  # 是否已弃用
+    examples: list = field(default_factory=list)  # 使用示例
 
     def __init__(self):
         """初始化工具，子类可覆盖添加额外设置"""
@@ -196,6 +204,96 @@ class BaseTool(ABC):
                 lines.append(f"    - {param_name} ({param_type}){required_mark}: {param_desc}")
 
         return "\n".join(lines)
+
+    def get_compact_prompt_description(self) -> str:
+        """
+        获取精简的工具描述（用于LLM prompt，节省token）
+
+        只展示关键信息：名称、简短描述、必需参数名
+        参数schema细节不在prompt中展示，仅用于验证
+
+        Returns:
+            精简的工具描述文本（约30-50 token）
+        """
+        desc = self.short_description or self.description[:30]
+        required = self.parameters.get("required", [])
+        req_str = f" 必需:{','.join(required)}" if required else ""
+        deprecated_mark = " [已弃用]" if self.deprecated else ""
+
+        return f"- {self.name}: {desc}{req_str}{deprecated_mark}"
+
+    def get_examples_text(self) -> str:
+        """
+        获取工具使用示例的文本格式
+
+        Returns:
+            示例文本，用于引导LLM正确使用工具
+        """
+        if not self.examples:
+            return ""
+
+        lines = [f"  示例:"]
+        for ex in self.examples[:2]:  # 最多展示2个示例
+            user_msg = ex.get("user", "")
+            params = ex.get("parameters", {})
+            lines.append(f'    用户: {user_msg}')
+            lines.append(f'    调用: <tool_call>{{"name": "{self.name}", "parameters": {params}}}</tool_call>')
+
+        return "\n".join(lines)
+
+    def summarize_result(self, result: ToolResult, max_length: int = 200) -> str:
+        """
+        将工具结果摘要为自然语言（供LLM阅读）
+
+        子类可覆盖此方法，提供领域特定的摘要逻辑
+
+        Args:
+            result: 工具执行结果
+            max_length: 摘要最大长度
+
+        Returns:
+            自然语言摘要
+        """
+        if not result.success:
+            return f"执行失败: {result.error}"
+
+        if result.data is None:
+            return "执行成功"
+
+        # 简单摘要策略
+        if isinstance(result.data, str):
+            text = result.data
+        elif isinstance(result.data, (int, float, bool)):
+            text = str(result.data)
+        elif isinstance(result.data, dict):
+            # 提取关键字段
+            key_fields = []
+            for k, v in result.data.items():
+                if k in ('message', 'content', 'text', 'summary', 'result'):
+                    if isinstance(v, str):
+                        key_fields.append(v)
+                        break
+                elif k in ('data', 'items', 'list'):
+                    if isinstance(v, list):
+                        key_fields.append(f"{len(v)}条数据")
+            text = " | ".join(key_fields) if key_fields else str(result.data)
+        elif isinstance(result.data, list):
+            text = f"{len(result.data)}条数据"
+        else:
+            text = str(result.data)
+
+        # 截断
+        if len(text) > max_length:
+            text = text[:max_length - 3] + "..."
+
+        return text
+
+    def get_full_identifier(self) -> str:
+        """返回带版本的完整标识"""
+        return f"{self.name}@v{self.version}"
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}(name='{self.name}', permission={self.permission.name})>"
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(name='{self.name}', permission={self.permission.name})>"

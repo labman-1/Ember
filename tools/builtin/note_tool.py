@@ -26,8 +26,20 @@ class NoteTool(BaseTool):
 
     name = "note_tool"
     description = "管理个人笔记，支持记录、查询和搜索"
+    short_description = "创建和管理笔记"
     permission = ToolPermission.READWRITE
     timeout = 10.0
+
+    examples = [
+        {
+            "user": "帮我记个笔记",
+            "parameters": {"operation": "create", "title": "待办事项", "content": "记得买牛奶", "tags": ["生活"]}
+        },
+        {
+            "user": "查看我的笔记",
+            "parameters": {"operation": "list"}
+        },
+    ]
 
     parameters = {
         "type": "object",

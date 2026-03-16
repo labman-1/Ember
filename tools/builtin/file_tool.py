@@ -21,8 +21,20 @@ class FileTool(BaseTool):
 
     name = "file_tool"
     description = "读写文件内容，可用于记录持久化信息或读取已有文件"
+    short_description = "读写文件、保存数据"
     permission = ToolPermission.READWRITE
     timeout = 10.0
+
+    examples = [
+        {
+            "user": "帮我保存这个内容到文件",
+            "parameters": {"operation": "write", "path": "data.txt", "content": "要保存的内容"}
+        },
+        {
+            "user": "读取配置文件",
+            "parameters": {"operation": "read", "path": "config.json"}
+        },
+    ]
 
     parameters = {
         "type": "object",
