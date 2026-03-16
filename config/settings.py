@@ -70,6 +70,7 @@ class Settings:
     SYSTEM_PROMPT = CORE_PERSONA + PROMPTS.get("system_prompt", "")
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
     GRAPH_CONSOLIDATION_PROMPT = PROMPTS.get("graph_consolidation_prompt", "")
+    TOOL_USAGE_GUIDELINES = PROMPTS.get("tool_usage_guidelines", "")
 
     STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
     STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30"))
@@ -111,6 +112,18 @@ class Settings:
 
     # LLM generation temperature; overridable via env for benchmark/determinism
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+
+    # Tool system configuration
+    ENABLE_TOOLS = os.getenv("ENABLE_TOOLS", "True").lower() == "true"
+    TOOL_MAX_CALLS_PER_TURN = int(os.getenv("TOOL_MAX_CALLS_PER_TURN", "3"))
+    TOOL_EXECUTOR_PERMISSION = os.getenv("TOOL_EXECUTOR_PERMISSION", "READWRITE")
+    TOOL_DEFAULT_TIMEOUT = float(os.getenv("TOOL_DEFAULT_TIMEOUT", "30.0"))
+    TOOL_FILE_SANDBOX_DIR = os.getenv("TOOL_FILE_SANDBOX_DIR", "./data/files")
+    TOOL_NOTES_DIR = os.getenv("TOOL_NOTES_DIR", "./data/notes")
+
+    # Tool-specific API keys (optional)
+    WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
+    SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
 
 
 settings = Settings()

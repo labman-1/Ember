@@ -1,0 +1,217 @@
+"""
+工具注册中心
+
+提供工具注册、发现、和元数据管理功能。
+生成LLM可用的工具描述JSON。
+"""
+import logging
+from typing import Dict, List, Optional, Type
+from tools.base import BaseTool, ToolPermission
+
+logger = logging.getLogger(__name__)
+
+
+class ToolRegistry:
+    """
+    工具注册中心
+
+    管理所有可用工具的注册和发现，为 LLM 提供工具描述。
+
+    Example:
+        >>> registry = ToolRegistry()
+        >>> registry.register(TimeTool())
+        >>> registry.register(FileTool())
+        >>> schemas = registry.get_all_schemas()
+    """
+
+    def __init__(self):
+        self._tools: Dict[str, BaseTool] = {}
+        self._permission_filter: Optional[ToolPermission] = None
+
+    def register(self, tool: BaseTool, overwrite: bool = False) -> bool:
+        """
+        注册工具
+
+        Args:
+            tool: 工具实例
+            overwrite: 是否覆盖已存在的同名工具
+
+        Returns:
+            是否注册成功
+        """
+        name = tool.name
+
+        if name in self._tools and not overwrite:
+            logger.warning(f"工具 '{name}' 已存在，跳过注册（使用 overwrite=True 覆盖）")
+            return False
+
+        self._tools[name] = tool
+        logger.debug(f"注册工具: {name} ({tool.permission.name})")
+        return True
+
+    def unregister(self, name: str) -> bool:
+        """
+        注销工具
+
+        Args:
+            name: 工具名称
+
+        Returns:
+            是否成功注销
+        """
+        if name not in self._tools:
+            logger.warning(f"工具 '{name}' 不存在，无法注销")
+            return False
+
+        del self._tools[name]
+        logger.debug(f"注销工具: {name}")
+        return True
+
+    def get(self, name: str) -> Optional[BaseTool]:
+        """
+        获取工具实例
+
+        Args:
+            name: 工具名称
+
+        Returns:
+            工具实例，不存在则返回 None
+        """
+        return self._tools.get(name)
+
+    def has(self, name: str) -> bool:
+        """
+        检查工具是否已注册
+
+        Args:
+            name: 工具名称
+
+        Returns:
+            是否已注册
+        """
+        return name in self._tools
+
+    def list_tools(self, permission: Optional[ToolPermission] = None) -> List[str]:
+        """
+        列出所有已注册工具名称
+
+        Args:
+            permission: 按权限级别过滤，None 表示不过滤
+
+        Returns:
+            工具名称列表
+        """
+        if permission is None:
+            return list(self._tools.keys())
+
+        return [
+            name for name, tool in self._tools.items()
+            if tool.permission == permission
+        ]
+
+    def get_all_schemas(self) -> List[dict]:
+        """
+        获取所有工具的 JSON Schema 描述
+
+        Returns:
+            符合 OpenAI Function Calling 格式的工具描述列表
+        """
+        return [tool.get_schema() for tool in self._tools.values()]
+
+    def get_schema(self, name: str) -> Optional[dict]:
+        """
+        获取单个工具的 JSON Schema 描述
+
+        Args:
+            name: 工具名称
+
+        Returns:
+            工具描述，不存在则返回 None
+        """
+        tool = self._tools.get(name)
+        return tool.get_schema() if tool else None
+
+    def get_tools_description_for_prompt(self, permission: Optional[ToolPermission] = None) -> str:
+        """
+        生成工具使用说明文本（用于注入 System Prompt）
+
+        Args:
+            permission: 按权限级别过滤，None 表示不过滤
+
+        Returns:
+            工具说明文本
+        """
+        tools = self._tools.values()
+        if permission is not None:
+            tools = [t for t in tools if t.permission == permission]
+
+        if not tools:
+            return ""
+
+        lines = ["你可以使用以下工具来增强与用户的交互："]
+        for tool in tools:
+            lines.append(tool.get_tool_description_for_prompt())
+
+        lines.append("")
+        lines.append("当你需要使用工具时，在回复中包含：")
+        lines.append('<tool_call>{"name": "tool_name", "parameters": {...}}</tool_call>')
+        lines.append("")
+        lines.append("工具结果会出现在下一个上下文窗口中。")
+
+        return "\n".join(lines)
+
+    def clear(self):
+        """清空所有注册的工具"""
+        count = len(self._tools)
+        self._tools.clear()
+        logger.debug(f"清空 {count} 个工具")
+
+    def register_from_class(self, tool_class: Type[BaseTool], *args, **kwargs) -> bool:
+        """
+        从工具类自动实例化并注册
+
+        Args:
+            tool_class: 工具类
+            *args, **kwargs: 传递给工具构造函数的参数
+
+        Returns:
+            是否注册成功
+        """
+        try:
+            tool = tool_class(*args, **kwargs)
+            return self.register(tool)
+        except Exception as e:
+            logger.error(f"实例化工具 {tool_class.__name__} 失败: {e}")
+            return False
+
+    def get_stats(self) -> dict:
+        """
+        获取注册中心统计信息
+
+        Returns:
+            统计信息字典
+        """
+        total = len(self._tools)
+        by_permission = {
+            "READONLY": len(self.list_tools(ToolPermission.READONLY)),
+            "READWRITE": len(self.list_tools(ToolPermission.READWRITE)),
+            "DESTRUCTIVE": len(self.list_tools(ToolPermission.DESTRUCTIVE)),
+        }
+
+        return {
+            "total": total,
+            "by_permission": by_permission,
+            "tools": self.list_tools(),
+        }
+
+    def __len__(self) -> int:
+        """返回已注册工具数量"""
+        return len(self._tools)
+
+    def __contains__(self, name: str) -> bool:
+        """检查是否包含指定工具"""
+        return name in self._tools
+
+    def __iter__(self):
+        """迭代所有工具"""
+        return iter(self._tools.values())
