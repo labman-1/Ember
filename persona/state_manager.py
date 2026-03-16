@@ -271,7 +271,7 @@ class StateManager:
 
     @property
     def prompt_injection(self):
-        return f"\n\n【前一时刻状态】\n{self.state_zip_full}\n\n"
+        return f"\n\n【角色的先前状态】\n{self.state_zip_full}\n\n"
 
     @property
     def state_zip_full(self):

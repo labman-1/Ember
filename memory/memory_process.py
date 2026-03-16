@@ -74,9 +74,9 @@ class Hippocampus:
             )
 
     def load_memory(self, content):
-        system_prompt = settings.CORE_PERSONA
+        system_prompt = settings.CORE_PERSONA + "\n" + settings.MEMORY_JUDGE_PROMPT
         logger.info(f"Loading Memory\n")
-        user_prompt = f"提供的日志如下：\n\n{content}\n\n{settings.MEMORY_JUDGE_PROMPT}"
+        user_prompt = f"提供的日志如下：\n\n{content}"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
