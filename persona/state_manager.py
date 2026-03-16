@@ -275,7 +275,7 @@ class StateManager:
         """压缩状态注入：完整保留字段，用紧凑格式节省 token"""
         s = self.current_state
         time_str = s.get("对应时间", "")
-        pad = f"P{s.get('P',5)} A{s.get('A',5)} D{s.get('D',5)}"
+        pad = f"P:{s.get('P',5)} A:{s.get('A',5)} D:{s.get('D',5)}"
         situation = s.get("客观情境", "")
         inner = s.get("内心活动", "")
         goal = s.get("近期目标", "")

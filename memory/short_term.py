@@ -77,13 +77,13 @@ class ShortTermMemory:
             self._add_back(role, speech)
             self.async_log(
                 "./config/chat_history.log",
-                f"\n{settings.CHARACTER_NAME}: {speech}\n",
+                f"{role}: {speech}",
             )
         else:
             self._add_back(role, content)
             self.async_log(
                 "./config/chat_history.log",
-                f"\n{role}: {content}\n",
+                f"{role}: {content}",
             )
         self._save_memory()
 
