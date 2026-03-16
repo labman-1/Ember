@@ -32,8 +32,8 @@ os.chdir(ROOT)
 LOG_FILE   = ROOT / "data" / "logs" / "system.log"
 ENV_FILE   = ROOT / ".env"
 ENV_BACKUP = ROOT / ".env.benchmark_backup"
-SCRIPT_FILE = ROOT / "test_script.json"
-CONFIG_FILE = ROOT / "test_config.json"
+SCRIPT_FILE = ROOT / "utils" / "test_script.json"
+CONFIG_FILE = ROOT / "utils" / "test_config.json"
 
 TIMEOUT = 120  # 每轮最长等待秒数
 
@@ -331,7 +331,7 @@ def generate_report(
 
     L.append("# Ember Benchmark Report")
     L.append(f"\n**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    L.append(f"**测试脚本**: `test_script.json`（{len(meta.get('turns', []))} 轮对话）")
+    L.append(f"**测试脚本**: `utils/test_script.json`（{len(meta.get('turns', []))} 轮对话）")
     L.append(f"**LLM_TEMPERATURE**: `0.0`（强制锁定，确保回复确定性）")
     L.append(f"\n---\n")
 
@@ -540,7 +540,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
 
     parser = argparse.ArgumentParser(description="Ember Benchmark Runner")
-    parser.add_argument("--stress",      action="store_true", help="强制开启压力测试（覆盖 test_config.json）")
+    parser.add_argument("--stress",      action="store_true", help="强制开启压力测试（覆盖 utils/test_config.json）")
     parser.add_argument("--stress-turns", type=int, default=None, help="压力测试轮数（覆盖配置）")
     parser.add_argument("--no-latency",  action="store_true", help="关闭延迟记录")
     parser.add_argument("--skip-b",      action="store_true", help="只跑 A 组（跳过 B 组）")
