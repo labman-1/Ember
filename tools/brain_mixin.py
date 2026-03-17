@@ -126,7 +126,7 @@ class ToolEnabledBrain:
             except json.JSONDecodeError as e:
                 logger.debug(f"代码块格式解析失败: {e}")
 
-        # 格式2: XML格式 逍遥<name>...</name><parameters>...</parameters>逍遥
+        # 格式2: XML格式 <tool_call><name>...</name><parameters>...</parameters><tool_call>
         for match in self.XML_TOOL_PATTERN.finditer(text):
             try:
                 name = match.group(1).strip()
@@ -136,7 +136,7 @@ class ToolEnabledBrain:
             except json.JSONDecodeError as e:
                 logger.debug(f"XML格式解析失败: {e}")
 
-        # 格式3: JSON格式 逍遥{"name": ..., "parameters": ...}逍遥
+        # 格式3: JSON格式 <tool_call>{"name": ..., "parameters": ...}<tool_call>
         for match in self.JSON_TOOL_PATTERN.finditer(text):
             try:
                 call_data = json.loads(match.group(1))
