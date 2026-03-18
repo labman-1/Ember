@@ -103,26 +103,34 @@ class ToolPluginManager:
         """
         tools = []
 
-        # 构建模块名
-        module_path = py_file.relative_to(self.plugin_dir.parent)
-        module_name = (
-            str(module_path.with_suffix("")).replace("\\", ".").replace("/", ".")
-        )
+        # 构建模块名（使用扁平命名避免父包依赖问题）
+        module_name = f"tools_plugins_{py_file.stem}"
 
         try:
-            # 使用 importlib.util 从文件路径加载模块（不污染 sys.path）
-            if module_name in sys.modules:
-                # 热重载：重新加载已存在的模块
-                module = sys.modules[module_name]
-                importlib.reload(module)
-            else:
-                # 从文件路径加载新模块
-                spec = importlib.util.spec_from_file_location(module_name, py_file)
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"无法加载模块: {py_file}")
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module  # 注册到 sys.modules 以便相对导入
+            # 如果模块已加载，直接使用缓存的工具类
+            if module_name in self._loaded_plugins:
+                # 返回已缓存的工具类（避免重复加载）
+                cached_tool_names = [
+                    name
+                    for name, cls in self._tool_classes.items()
+                    if cls.__module__ == module_name
+                ]
+                for name in cached_tool_names:
+                    tools.append(self._tool_classes[name])
+                return tools
+
+            # 从文件路径加载新模块
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"无法加载模块: {py_file}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module  # 注册到 sys.modules 以便相对导入
+            try:
                 spec.loader.exec_module(module)
+            except Exception:
+                # 加载失败时清理 sys.modules
+                sys.modules.pop(module_name, None)
+                raise
 
             # 查找 BaseTool 子类
             for name, obj in inspect.getmembers(module):
@@ -299,6 +307,9 @@ def create_tool_template(tool_name: str, output_dir: Optional[str] = None) -> Pa
     target_dir = Path(output_dir or ToolPluginManager.DEFAULT_PLUGIN_DIR)
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # 确保文件名符合 *_tool.py 模式
+    if not tool_name.endswith("_tool"):
+        tool_name = f"{tool_name}_tool"
     file_path = target_dir / f"{tool_name}.py"
 
     template = f'''"""

@@ -18,6 +18,7 @@ from memory.memory_process import Hippocampus
 from memory.db_memory import DBMemory
 from memory.entity_extraction import EntityExtractionMemory
 from config.logging_config import get_logger
+from tools.processor import ToolCallProcessor
 
 # Configure logging
 logger = get_logger(__name__)
@@ -74,10 +75,22 @@ class EmberServer:
         self.episodic_memory = EpisodicMemory(self.event_bus)
         self.hippocampus = Hippocampus(self.event_bus)
         self.db_memory = DBMemory(self.event_bus)
-        self.state_manager = StateManager(self.event_bus, self.hippocampus, self.memory)
+
+        # 创建并复用 ToolCallProcessor
+        self.tool_processor = ToolCallProcessor.create_with_memory_tool(
+            self.hippocampus
+        )
+
+        self.state_manager = StateManager(
+            self.event_bus, self.hippocampus, self.memory, self.tool_processor
+        )
         self.entity_memory = EntityExtractionMemory(self.event_bus)
         self.brain = Brain(
-            self.event_bus, self.state_manager, self.memory, self.hippocampus
+            self.event_bus,
+            self.state_manager,
+            self.memory,
+            self.hippocampus,
+            self.tool_processor,
         )
         self.tts_manager = TTSManager(voice="zh-CN-XiaoxiaoNeural")
 

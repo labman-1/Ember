@@ -24,10 +24,14 @@ class Brain:
         state_manager: StateManager,
         memory: ShortTermMemory,
         hippocampus: Hippocampus,
+        tool_processor: ToolCallProcessor = None,
     ):
-        # 工具调用处理器
-        self.tool_processor = ToolCallProcessor.create_with_memory_tool(
-            hippocampus, max_calls=self.MAX_TOOL_CALLS_PER_TURN
+        # 工具调用处理器（外部传入或自动创建）
+        self.tool_processor = (
+            tool_processor
+            or ToolCallProcessor.create_with_memory_tool(
+                hippocampus, max_calls=self.MAX_TOOL_CALLS_PER_TURN
+            )
         )
 
         # Brain 自身的属性
@@ -224,8 +228,45 @@ class Brain:
                     break
 
             # 确保移除所有工具调用标签（防止 LLM 在工具执行后又输出工具调用）
+            retry_count = 0
+            max_retry = 2
+            while (
+                self.tool_processor.has_tool_calls(full_content)
+                and retry_count < max_retry
+            ):
+                retry_count += 1
+                logger.warning(
+                    f"[Tool] 最终输出仍包含工具调用标签，请求 LLM 重新生成 (第 {retry_count} 次)"
+                )
+
+                # 请求 LLM 重新生成（不带工具调用）
+                retry_messages = current_messages + [
+                    {"role": "assistant", "content": full_content},
+                    {
+                        "role": "user",
+                        "content": "你的回复中包含了工具调用标签，这是不允许的。请直接给出你的回复，不要使用任何工具调用。",
+                    },
+                ]
+
+                try:
+                    retry_content = ""
+                    stream_gen = self.llm_client.stream_chat(
+                        model_config=settings.LARGE_LLM,
+                        messages=retry_messages,
+                    )
+                    for chunk in stream_gen:
+                        retry_content += chunk
+                        self.event_bus.publish(
+                            Event(name="llm.chunk", data={"text": chunk})
+                        )
+                    full_content = retry_content
+                except Exception as e:
+                    logger.error(f"LLM 重试生成失败: {e}")
+                    break
+
+            # 最终仍有工具标签，强制清理
             if self.tool_processor.has_tool_calls(full_content):
-                logger.warning("[Tool] 最终输出仍包含工具调用标签，强制清理")
+                logger.warning("[Tool] 重试后仍有工具标签，强制清理")
                 full_content = self.tool_processor.remove_tool_calls(full_content)
 
             # 修复可能不完整的标签

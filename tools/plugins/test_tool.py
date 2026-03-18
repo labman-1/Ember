@@ -16,8 +16,10 @@ class TestTool(BaseTool):
     """
 
     name = "test_tool"
-    description = "一个简单的测试工具，用于验证插件自动发现功能是否正常工作"
-    short_description = "测试工具，验证插件系统"
+    description = (
+        "一个简单的测试工具，用于验证插件自动发现功能是否正常工作（不允许调用）"
+    )
+    short_description = "测试工具，验证插件系统（不允许调用）"
     permission = ToolPermission.READONLY
     timeout = 5.0
     version = "1.0.0"

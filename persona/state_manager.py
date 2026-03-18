@@ -23,6 +23,7 @@ class StateManager:
         event_bus: EventBus,
         hippocampus: Hippocampus,
         short_term_memory: ShortTermMemory,
+        tool_processor: ToolCallProcessor = None,
     ):
         self.event_bus = event_bus
         self.hippocampus = hippocampus
@@ -38,8 +39,10 @@ class StateManager:
         self.is_sleeping = False
         self.dialogue_count = 0
 
-        # 初始化工具调用处理器
-        self.tool_processor = ToolCallProcessor.create_with_memory_tool(hippocampus)
+        # 工具调用处理器（外部传入或自动创建）
+        self.tool_processor = (
+            tool_processor or ToolCallProcessor.create_with_memory_tool(hippocampus)
+        )
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
         self.event_bus.subscribe("system.tick", self._on_tick)
@@ -178,6 +181,40 @@ class StateManager:
 
             # 保存最终清理后的文本
             final_response = result["clean_text"]
+
+        # 检查最终输出是否仍包含工具标签，如果是则重试
+        retry_count = 0
+        max_retry = 2
+        while (
+            self.tool_processor.has_tool_calls(final_response)
+            and retry_count < max_retry
+        ):
+            retry_count += 1
+            logger.warning(
+                f"[StateManager] 最终输出仍包含工具调用标签，请求 LLM 重新生成 (第 {retry_count} 次)"
+            )
+
+            retry_messages = messages + [
+                {"role": "assistant", "content": final_response},
+                {
+                    "role": "user",
+                    "content": "你的回复中包含了工具调用标签，这是不允许的。请直接给出你的回复，不要使用任何工具调用。",
+                },
+            ]
+
+            retry_response = self.llm_client.one_chat(
+                model_config=settings.SMALL_LLM,
+                messages=retry_messages,
+                call_type=call_type,
+            )
+
+            if retry_response:
+                final_response = retry_response
+
+        # 最终仍有工具标签，强制清理
+        if self.tool_processor.has_tool_calls(final_response):
+            logger.warning("[StateManager] 重试后仍有工具标签，强制清理")
+            final_response = self.tool_processor.remove_tool_calls(final_response)
 
         return final_response
 

@@ -148,6 +148,7 @@ def init_modules():
     from memory.db_memory import DBMemory
     from memory.episodic_memory import EpisodicMemory
     from memory.memory_process import Hippocampus
+    from tools.processor import ToolCallProcessor
     from config.settings import settings
     import config.logging_config  # noqa: F401 — 必须激活日志配置
 
@@ -159,8 +160,9 @@ def init_modules():
     )
     episodic_memory = EpisodicMemory(event_bus)
     hippocampus = Hippocampus(event_bus)
-    state_manager = StateManager(event_bus, hippocampus, memory)
-    brain = Brain(event_bus, state_manager, memory, hippocampus)
+    tool_processor = ToolCallProcessor.create_with_memory_tool(hippocampus)
+    state_manager = StateManager(event_bus, hippocampus, memory, tool_processor)
+    brain = Brain(event_bus, state_manager, memory, hippocampus, tool_processor)
     db_memory = DBMemory(event_bus)
     heartbeat.start()
 
@@ -428,10 +430,15 @@ def generate_report(
 
     # ── 2.5. 后台调用 Token 统计 ───────────────────────────────────────────────
     L.append("## 2.5. 后台调用 Token 统计\n")
-    L.append("> 后台调用包括：状态更新(state_update)、闲置演化(idle_evolve)、记忆检索(memory_query)、记忆编码(memory_encode)\n")
+    L.append(
+        "> 后台调用包括：状态更新(state_update)、闲置演化(idle_evolve)、记忆检索(memory_query)、记忆编码(memory_encode)\n"
+    )
     L.append("| 组别 | 后台 Total | 对话 Total | 后台占比 |")
     L.append("|------|-----------|-----------|---------|")
-    for grp_lbl, grp_p, grp_bg in [("A", total_a_p, total_a_bg), ("B", total_b_p, total_b_bg)]:
+    for grp_lbl, grp_p, grp_bg in [
+        ("A", total_a_p, total_a_bg),
+        ("B", total_b_p, total_b_bg),
+    ]:
         bg_pct = grp_bg / (grp_p + grp_bg) * 100 if (grp_p + grp_bg) > 0 else 0
         L.append(f"| {grp_lbl} | {grp_bg} | {grp_p} | {bg_pct:.1f}% |")
     L.append("")
