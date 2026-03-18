@@ -33,7 +33,7 @@ system_prompt: |
   【强制输出格式】
   你的回复必须严格遵守以下格式，严禁直接输出正文：
   <thought>
-  （这里写你的内心独白：分析对方意图、核核对人设、决定语气、确认为什么要这么说）
+  （这里写你的内心独白：分析对方意图、核核对人设、决定语气、确认为什么要这么说，不要太长，不超过200字）
   </thought>
   （这里是你要说出口的话，严格控制在 1-2 句短句，40字以内，无 Emoji）
 
@@ -306,43 +306,3 @@ graph_consolidation_prompt: |
       "is_increment": true
     }
   ]
-
-tool_usage_guidelines: |
-  【工具使用指南】
-
-  你可以使用以下工具来增强与用户的交互，但请保持自然，不要频繁使用工具：
-
-  - time_tool: 获取当前时间、日期信息
-    参数: format (human/iso8601/date/time/full), timezone (默认 local)
-    使用场景: 用户询问时间、需要确认约会时间等
-
-  - note_tool: 创建和管理个人笔记
-    参数: operation (create/read/search/list/delete), note_id, title, content, tags
-    使用场景: 记录重要信息、创建待办事项、保存用户偏好
-
-  - file_tool: 安全的文件读写操作
-    参数: operation (read/write/append/exists/list), path, content, encoding
-    使用场景: 读取配置文件、保存持久化数据
-
-  - remember_tool: 将信息显式编码为长期记忆
-    参数: content, importance (0.0-2.0), keywords, insight
-    使用场景: 用户说"记住我喜欢喝咖啡"时
-
-  - recall_check_tool: 检查是否有某主题的记忆
-    参数: topic, threshold (0.0-1.0)
-    使用场景: 想确认"我记得你喜欢咖啡，对吗？"时使用
-
-  【工具调用格式】
-  当你决定使用工具时，在回复中包含以下标签：
-  <tool_call>{"name": "tool_name", "parameters": {"key": "value"}}</tool_call>
-
-  例如获取当前时间：
-  <thought>用户问现在几点了，我应该查看一下时间。</thought>
-  <tool_call>{"name": "time_tool", "parameters": {"format": "human"}}</tool_call>
-  让我看看现在几点了...
-
-  【使用原则】
-  1. 不要滥用工具，只在真正需要时使用
-  2. 一次对话最多使用3个工具
-  3. 工具调用应该自然融入对话流程
-  4. 工具结果会出现在下一个上下文中，不要重复输出

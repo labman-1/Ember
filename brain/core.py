@@ -5,15 +5,18 @@ from core.event_bus import EventBus, Event
 from persona.state_manager import StateManager
 import threading
 import logging
-import concurrent.futures
 from memory.memory_process import Hippocampus
 import json
 from brain.tag_utils import validate_and_fix_llm_output
+from tools.processor import ToolCallProcessor
 
 logger = logging.getLogger(__name__)
 
 
 class Brain:
+
+    # 最大单次对话工具调用次数
+    MAX_TOOL_CALLS_PER_TURN = 5
 
     def __init__(
         self,
@@ -22,13 +25,21 @@ class Brain:
         memory: ShortTermMemory,
         hippocampus: Hippocampus,
     ):
+        # 工具调用处理器
+        self.tool_processor = ToolCallProcessor.create_with_memory_tool(
+            hippocampus, max_calls=self.MAX_TOOL_CALLS_PER_TURN
+        )
+
+        # Brain 自身的属性
         self.lock = threading.Lock()
         self._is_processing = False
         self.llm_client = LLMClient()
-        self.event_bus = event_bus
         self.state_manager = state_manager
         self.memory = memory
+        self.event_bus = event_bus
         self.hippocampus = hippocampus
+
+        # 订阅事件
         self.event_bus.subscribe("user.input", self._on_user_input)
         self.event_bus.subscribe("idle_speak", self._on_idle_speak)
 
@@ -40,7 +51,6 @@ class Brain:
     def _on_idle_speak(self, event: Event):
         def _speak():
             with self.lock:
-                # 保持 System Prompt 静态
                 self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
             self._llm_speak(self.memory, pack=True, memories="")
 
@@ -48,34 +58,26 @@ class Brain:
         thread.start()
 
     def process_dialogue(self, user_message):
-        # 防止并发处理（简单丢弃重复输入）
+        # 防止并发处理
         if self._is_processing:
             logger.warning("正在处理中，忽略新输入")
             return
 
         try:
             self._is_processing = True
-            self.memory.add_message("user", user_message)
-            history = json.dumps(self.memory.get_memory(), ensure_ascii=False)
-            state = self.state_manager.prompt_injection
-            messages = [
-                "history:" + history,
-                "state:" + state,
-            ]
-            road_result = self.hippocampus.load_memory(messages)
-            memories = (
-                json.dumps(road_result, ensure_ascii=False) if road_result else ""
-            )
-            # 保持 System Prompt 静态，不再拼接动态内容
-            self.memory.update_base_prompt(settings.SYSTEM_PROMPT)
 
-            self._llm_speak(self.memory, pack=True, memories=memories)
+            self.memory.add_message("user", user_message)
+            # 注入工具说明到 System Prompt
+            enhanced_prompt = self.tool_processor.build_system_prompt_with_tools(
+                settings.SYSTEM_PROMPT
+            )
+            self.memory.update_base_prompt(enhanced_prompt)
+
+            self._llm_speak(self.memory, pack=True)
         finally:
             self._is_processing = False
 
     def _llm_speak(self, memory, pack: bool = False, memories: str = ""):
-        import concurrent.futures
-
         # 在锁外准备数据，减少锁持有时间
         with self.lock:
             data = memory.get_full_messages()
@@ -91,7 +93,6 @@ class Brain:
                 )
                 formatted_history += f"{role_label}: {msg['content']}\n"
 
-            # 构建动态内容部分（放入 user message，保持 system 静态以提高缓存命中率）
             dynamic_context = ""
             if memories:
                 dynamic_context = f"\n\n[脑海闪现的记忆]：\n{memories}\n"
@@ -119,10 +120,9 @@ class Brain:
 
         full_content = ""
         chunk_count = 0
-        max_chunks = 10000  # 防止无限流
+        max_chunks = 10000
 
         try:
-            # 使用超时包装流式调用
             stream_gen = self.llm_client.stream_chat(
                 model_config=settings.LARGE_LLM,
                 messages=messages,
@@ -139,17 +139,100 @@ class Brain:
 
         except Exception as e:
             logger.error(f"LLM 流式调用失败: {e}")
-            # 通知用户错误
             error_msg = "[系统: AI 响应出现问题，请稍后再试]"
             self.event_bus.publish(Event(name="llm.chunk", data={"text": error_msg}))
             full_content = error_msg
 
         if full_content:
+            # 多轮工具调用处理
+            max_tool_iterations = 1
+            iteration = 0
+            current_messages = messages.copy()
+
+            while iteration < max_tool_iterations:
+                iteration += 1
+
+                # 检测并执行工具调用
+                tool_calls = self.tool_processor.extract_tool_calls(full_content)
+
+                if not tool_calls:
+                    break  # 没有工具调用，结束循环
+
+                logger.info(
+                    f"[Tool] 第 {iteration} 轮检测到 {len(tool_calls)} 个工具调用"
+                )
+
+                # 执行工具调用（带调用来源标识）
+                tool_results = self.tool_processor.execute_tool_calls(
+                    tool_calls, caller=f"Brain._llm_speak[iter{iteration}]"
+                )
+
+                # 格式化工具结果
+                tool_results_text = self.tool_processor.format_tool_results_for_prompt(
+                    tool_results
+                )
+
+                # 从原始内容中移除工具调用标签
+                clean_content = self.tool_processor.remove_tool_calls(full_content)
+
+                # 如果有工具结果，需要让 LLM 继续生成回复
+                if tool_results_text:
+                    # 发布工具执行结果事件
+                    self.event_bus.publish(
+                        Event(
+                            name="tool.executed",
+                            data={
+                                "calls": tool_calls,
+                                "results": tool_results,
+                                "iteration": iteration,
+                            },
+                        )
+                    )
+
+                    # 构建包含工具结果的新消息
+                    current_messages = current_messages + [
+                        {"role": "assistant", "content": full_content},
+                        {
+                            "role": "user",
+                            "content": f"{tool_results_text}\n\n【重要】你现在已经获取了所需的信息，请立刻生成你的回复。\n【重要】不要再调用任何工具！直接根据工具结果和提示词要求生成回复！",
+                        },
+                    ]
+
+                    # 再次调用 LLM 生成回复
+                    try:
+                        follow_up_content = ""
+                        stream_gen = self.llm_client.stream_chat(
+                            model_config=settings.LARGE_LLM,
+                            messages=current_messages,
+                        )
+
+                        for chunk in stream_gen:
+                            chunk_count += 1
+                            follow_up_content += chunk
+                            self.event_bus.publish(
+                                Event(name="llm.chunk", data={"text": chunk})
+                            )
+
+                        full_content = follow_up_content
+
+                    except Exception as e:
+                        logger.error(f"LLM 工具后续调用失败: {e}")
+                        full_content = clean_content
+                        break
+                else:
+                    full_content = clean_content
+                    break
+
+            # 确保移除所有工具调用标签（防止 LLM 在工具执行后又输出工具调用）
+            if self.tool_processor.has_tool_calls(full_content):
+                logger.warning("[Tool] 最终输出仍包含工具调用标签，强制清理")
+                full_content = self.tool_processor.remove_tool_calls(full_content)
+
             # 修复可能不完整的标签
             full_content = validate_and_fix_llm_output(full_content)
+
             logger.info(f"LLM回复: {full_content[:100]}...")
 
-            # 安全地添加消息到内存
             try:
                 self.memory.add_message("assistant", full_content)
             except Exception as e:
