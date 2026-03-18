@@ -71,17 +71,21 @@ class Brain:
             self._is_processing = True
 
             self.memory.add_message("user", user_message)
-            # 注入工具说明到 System Prompt
-            enhanced_prompt = self.tool_processor.build_system_prompt_with_tools(
-                settings.SYSTEM_PROMPT
+
+            # 异步更新 base_prompt（不阻塞 LLM 调用）
+            # 注：实际注入到消息中是在 _llm_speak 中完成的
+            self.memory.update_base_prompt(
+                self.tool_processor.build_system_prompt_with_tools(settings.SYSTEM_PROMPT)
             )
-            self.memory.update_base_prompt(enhanced_prompt)
 
             self._llm_speak(self.memory, pack=True)
         finally:
             self._is_processing = False
 
     def _llm_speak(self, memory, pack: bool = False, memories: str = ""):
+        # 立即发布 llm.started 事件，让前端尽早显示"正在思考"
+        self.event_bus.publish(Event(name="llm.started", data=""))
+
         # 在锁外准备数据，减少锁持有时间
         with self.lock:
             data = memory.get_full_messages()
@@ -90,24 +94,20 @@ class Brain:
 
         # 构建消息（在锁外）
         if pack:
-            formatted_history = ""
+            # 使用列表构建历史，比字符串拼接更高效
+            history_parts = []
             for msg in history:
                 role_label = (
                     "对方" if msg["role"] == "user" else f"{settings.CHARACTER_NAME}"
                 )
-                formatted_history += f"{role_label}: {msg['content']}\n"
+                history_parts.append(f"{role_label}: {msg['content']}\n")
+            formatted_history = "".join(history_parts)
 
             dynamic_context = ""
             if memories:
                 dynamic_context = f"\n\n[脑海闪现的记忆]：\n{memories}\n"
 
             state_injection = self.state_manager.prompt_injection
-            base_len = len(settings.SYSTEM_PROMPT)
-            mem_len = max(0, len(system_prompt) - base_len)
-            logger.info(
-                f"[Prompt Breakdown] base={base_len} mem={mem_len}"
-                f" history={len(formatted_history)} state={len(state_injection)}"
-            )
 
             user_content = f"""以下是对话历史：
 {formatted_history}{dynamic_context}{state_injection}
@@ -119,8 +119,6 @@ class Brain:
             ]
         else:
             messages = data
-
-        self.event_bus.publish(Event(name="llm.started", data=""))
 
         full_content = ""
         chunk_count = 0

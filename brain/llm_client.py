@@ -1,6 +1,7 @@
 from openai import OpenAI
 import logging
 import json
+import threading
 from json_repair import repair_json
 from config.settings import settings
 
@@ -8,19 +9,50 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
+    """
+    LLM 客户端（单例模式）
+
+    所有模块共享同一个实例，复用 HTTP 连接池，减少 TLS 握手开销。
+    内部维护三个独立的 OpenAI 客户端：
+    - large_client: 大模型（用于对话生成）
+    - small_client: 小模型（用于状态更新等轻量任务）
+    - embedding_client: 嵌入模型（用于向量化）
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
-        self.large_client = OpenAI(
-            api_key=settings.LARGE_LLM.api_key,
-            base_url=settings.LARGE_LLM.base_url,
-        )
-        self.small_client = OpenAI(
-            api_key=settings.SMALL_LLM.api_key,
-            base_url=settings.SMALL_LLM.base_url,
-        )
-        self.embedding_client = OpenAI(
-            api_key=settings.EMBEDDING_MODEL.api_key,
-            base_url=settings.EMBEDDING_MODEL.base_url,
-        )
+        # 避免重复初始化
+        if self._initialized:
+            return
+
+        with self._lock:
+            if self._initialized:
+                return
+
+            logger.info("[LLMClient] 初始化连接池（单例模式）")
+            self.large_client = OpenAI(
+                api_key=settings.LARGE_LLM.api_key,
+                base_url=settings.LARGE_LLM.base_url,
+            )
+            self.small_client = OpenAI(
+                api_key=settings.SMALL_LLM.api_key,
+                base_url=settings.SMALL_LLM.base_url,
+            )
+            self.embedding_client = OpenAI(
+                api_key=settings.EMBEDDING_MODEL.api_key,
+                base_url=settings.EMBEDDING_MODEL.base_url,
+            )
+            self._initialized = True
 
     def _extract_json(self, content):
         if not content or not content.strip():
@@ -38,7 +70,7 @@ class LLMClient:
 
     def _log_usage(self, usage, model_name: str, call_type: str = "dialogue"):
         """记录 Token 消耗日志，兼容 OpenAI 和 Gemini 两种响应格式，包含缓存信息和调用类型
-        
+
         call_type: dialogue(对话) | state_update(状态更新) | idle_evolve(闲置演化) | memory_query(记忆检索) | memory_encode(记忆编码)
         """
         if usage is None:
@@ -94,9 +126,11 @@ class LLMClient:
             f"[LLM Usage] Type: {call_type} | Model: {model_name} | Prompt: {p} | Completion: {c} | Total: {p + c}{cache_info}"
         )
 
-    def one_chat(self, model_config, messages, timeout=60, call_type: str = "state_update"):
+    def one_chat(
+        self, model_config, messages, timeout=60, call_type: str = "state_update"
+    ):
         """单次对话，带超时和重试
-        
+
         call_type: 用于区分调用来源，默认 state_update（非对话类调用）
         """
         client = (
@@ -132,7 +166,7 @@ class LLMClient:
 
     def stream_chat(self, model_config, messages, call_type: str = "dialogue"):
         """流式对话
-        
+
         call_type: 用于区分调用来源，默认 dialogue（对话类调用）
         """
         client = (

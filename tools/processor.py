@@ -61,6 +61,9 @@ class ToolCallProcessor:
         self.tool_executor = ToolExecutor(tool_registry)
         self.max_calls = max_calls
         self.timeout = timeout
+        # 缓存增强后的 system prompt，避免每次请求都重新构建
+        self._cached_prompt: Optional[str] = None
+        self._cached_base_prompt: Optional[str] = None
 
     @classmethod
     def create_with_memory_tool(
@@ -295,7 +298,7 @@ class ToolCallProcessor:
 
     def build_system_prompt_with_tools(self, base_prompt: str) -> str:
         """
-        构建包含工具说明的 system prompt
+        构建包含工具说明的 system prompt（带缓存）
 
         Args:
             base_prompt: 基础 system prompt
@@ -303,7 +306,13 @@ class ToolCallProcessor:
         Returns:
             增强后的 system prompt
         """
+        # 检查缓存是否有效
+        if self._cached_prompt and self._cached_base_prompt == base_prompt:
+            return self._cached_prompt
+
         if len(self.tool_registry) == 0:
+            self._cached_base_prompt = base_prompt
+            self._cached_prompt = base_prompt
             return base_prompt
 
         tool_guidelines = self.tool_registry.get_tools_description_for_prompt(
@@ -311,7 +320,14 @@ class ToolCallProcessor:
             include_examples=True,
         )
 
-        return f"""{base_prompt}
+        result = f"""{base_prompt}
 
 {tool_guidelines}
 """
+
+        # 更新缓存
+        self._cached_base_prompt = base_prompt
+        self._cached_prompt = result
+        logger.debug("[ToolProcessor] 已缓存增强后的 System Prompt")
+
+        return result
