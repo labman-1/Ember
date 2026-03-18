@@ -276,20 +276,14 @@ class StateManager:
 
         history = self.short_term_memory.get_memory().get("history", [])
 
-        context_for_memory = f"时间: {logical_now_str}\n对话历史: {json.dumps(history, ensure_ascii=False)}\n先前状态: {json.dumps(self.current_state, ensure_ascii=False)}"
-
-        memories = self.hippocampus.load_memory(context_for_memory)
+        # 不再直接调用 hippocampus.load_memory，改为让 LLM 通过工具主动获取记忆
+        # 这样与对话系统的记忆加载方式保持一致
 
         user_content = f"""【环境变更推断任务】
 距离上次互动已经过去 {info['idle_duration']} 分钟，当前时间为 {info['current_time']}。
 历史状态：{info['old_state']}
+[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}
 """
-
-        if memories:
-            user_content = (
-                f"[脑海闪现的记忆]:\n{memories}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n"
-                + user_content
-            )
 
         prompt = user_content + "\n\n" + settings.IDLE_STATE_UPDATE_PROMPT
 

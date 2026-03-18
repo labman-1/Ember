@@ -4,6 +4,7 @@
 支持从指定目录自动加载工具，简化工具添加流程。
 实现插件化架构，工具定义在单一文件，自动注册。
 """
+
 import importlib
 import importlib.util
 import inspect
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PluginMetadata:
     """插件元数据"""
+
     name: str
     version: str = "1.0.0"
     description: str = ""
@@ -103,7 +105,9 @@ class ToolPluginManager:
 
         # 构建模块名
         module_path = py_file.relative_to(self.plugin_dir.parent)
-        module_name = str(module_path.with_suffix("")).replace("\\", ".").replace("/", ".")
+        module_name = (
+            str(module_path.with_suffix("")).replace("\\", ".").replace("/", ".")
+        )
 
         try:
             # 使用 importlib.util 从文件路径加载模块（不污染 sys.path）
