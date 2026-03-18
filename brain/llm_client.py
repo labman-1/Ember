@@ -54,6 +54,12 @@ class LLMClient:
             )
             self._initialized = True
 
+    @classmethod
+    def _reset_instance(cls):
+        """重置单例实例（仅用于测试）"""
+        with cls._lock:
+            cls._instance = None
+
     def _extract_json(self, content):
         if not content or not content.strip():
             logger.warning("LLM 返回空内容，无法解析 JSON")
