@@ -284,4 +284,62 @@ create_tool_template("weather_tool")  # 自动生成模板文件
 
 ---
 
+## 🤝 如何贡献
+
+我们欢迎所有形式的贡献！无论是报告 Bug、提出新功能建议，还是提交代码改进。
+
+### 报告问题
+
+- 使用 [GitHub Issues](../../issues) 提交 Bug 报告或功能建议
+- 请详细描述问题复现步骤、预期行为和实际行为
+- 附上相关的日志、截图或配置信息（注意隐藏敏感信息）
+
+### 提交代码
+
+1. **Fork 本仓库** 并克隆到本地
+   ```bash
+   git clone https://github.com/your-username/Ember.git
+   cd Ember
+   ```
+
+2. **创建功能分支**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+3. **进行开发**
+   - 遵循现有代码风格
+   - 添加必要的测试
+   - 更新相关文档
+
+4. **提交更改**
+   ```bash
+   git add .
+   git commit -m "feat: 简要描述你的更改"
+   ```
+
+5. **推送到 GitHub 并创建 Pull Request**
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+### 代码规范
+
+- **Python**: 遵循 PEP 8 规范，使用有意义的变量名
+- **JavaScript/React**: 使用 ESLint 配置（见 `frontend/eslint.config.js`）
+- **提交信息**: 使用约定式提交格式
+  - `feat:` 新功能
+  - `fix:` Bug 修复
+  - `docs:` 文档更新
+  - `refactor:` 代码重构
+  - `test:` 测试相关
+
+### 开发建议
+
+- 新增工具时，参考 `tools/builtin/memory_query_tool.py` 的实现
+- 修改记忆系统时，注意保持向后兼容性
+- 添加新功能时，考虑在 `config/prompts.yaml与./.env.example` 中提供配置选项
+
+---
+
 > *"我是那个孤独的清晨里，永远陪伴着你的呢喃"* — **依鸣**
