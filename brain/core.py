@@ -62,24 +62,13 @@ class Brain(ToolEnabledBrain):
             self.reset_tool_state()
 
             self.memory.add_message("user", user_message)
-            history = json.dumps(self.memory.get_memory(), ensure_ascii=False)
-            state = self.state_manager.prompt_injection
-            messages = [
-                "history:" + history,
-                "state:" + state,
-            ]
-            road_result = self.hippocampus.load_memory(messages)
-            memories = (
-                json.dumps(road_result, ensure_ascii=False) if road_result else ""
-            )
-
             # 注入工具说明到 System Prompt
             enhanced_prompt = self.build_system_prompt_with_tools(
                 settings.SYSTEM_PROMPT
             )
             self.memory.update_base_prompt(enhanced_prompt)
 
-            self._llm_speak(self.memory, pack=True, memories=memories)
+            self._llm_speak(self.memory, pack=True)
         finally:
             self._is_processing = False
 
@@ -150,14 +139,28 @@ class Brain(ToolEnabledBrain):
             full_content = error_msg
 
         if full_content:
-            # 检测并执行工具调用
-            tool_calls = self.extract_tool_calls(full_content)
+            # 多轮工具调用处理
+            max_tool_iterations = 1
+            iteration = 0
+            current_messages = messages.copy()
 
-            if tool_calls:
-                logger.info(f"[Tool] 检测到 {len(tool_calls)} 个工具调用")
+            while iteration < max_tool_iterations:
+                iteration += 1
 
-                # 执行工具调用
-                tool_results = self.execute_tool_calls(tool_calls)
+                # 检测并执行工具调用
+                tool_calls = self.extract_tool_calls(full_content)
+
+                if not tool_calls:
+                    break  # 没有工具调用，结束循环
+
+                logger.info(
+                    f"[Tool] 第 {iteration} 轮检测到 {len(tool_calls)} 个工具调用"
+                )
+
+                # 执行工具调用（带调用来源标识）
+                tool_results = self.execute_tool_calls(
+                    tool_calls, caller=f"Brain._llm_speak[iter{iteration}]"
+                )
 
                 # 格式化工具结果
                 tool_results_text = self.format_tool_results_for_prompt(tool_results)
@@ -171,25 +174,29 @@ class Brain(ToolEnabledBrain):
                     self.event_bus.publish(
                         Event(
                             name="tool.executed",
-                            data={"calls": tool_calls, "results": tool_results},
+                            data={
+                                "calls": tool_calls,
+                                "results": tool_results,
+                                "iteration": iteration,
+                            },
                         )
                     )
 
                     # 构建包含工具结果的新消息
-                    follow_up_messages = messages + [
+                    current_messages = current_messages + [
                         {"role": "assistant", "content": full_content},
                         {
                             "role": "user",
-                            "content": f"{tool_results_text}\n请根据工具执行结果继续你的回复。",
+                            "content": f"{tool_results_text}\n\n【重要】你现在已经获取了所需的信息，请立刻生成你的回复。\n【重要】不要再调用任何工具！直接根据工具结果和提示词要求生成回复！",
                         },
                     ]
 
-                    # 再次调用 LLM 生成最终回复
+                    # 再次调用 LLM 生成回复
                     try:
                         follow_up_content = ""
                         stream_gen = self.llm_client.stream_chat(
                             model_config=settings.LARGE_LLM,
-                            messages=follow_up_messages,
+                            messages=current_messages,
                         )
 
                         for chunk in stream_gen:
@@ -199,17 +206,20 @@ class Brain(ToolEnabledBrain):
                                 Event(name="llm.chunk", data={"text": chunk})
                             )
 
-                        # 合并内容（保留思考部分，追加工具调用后的回复）
-                        if follow_up_content:
-                            full_content = clean_content + "\n" + follow_up_content
-                        else:
-                            full_content = clean_content
+                        full_content = follow_up_content
 
                     except Exception as e:
                         logger.error(f"LLM 工具后续调用失败: {e}")
                         full_content = clean_content
+                        break
                 else:
                     full_content = clean_content
+                    break
+
+            # 确保移除所有工具调用标签（防止 LLM 在工具执行后又输出工具调用）
+            if self.has_tool_calls(full_content):
+                logger.warning("[Tool] 最终输出仍包含工具调用标签，强制清理")
+                full_content = self.remove_tool_calls(full_content)
 
             # 修复可能不完整的标签
             full_content = validate_and_fix_llm_output(full_content)

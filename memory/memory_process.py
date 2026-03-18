@@ -73,7 +73,110 @@ class Hippocampus:
                 f"Failed to decode LLM response during memory preprocessing: {e}. Raw response: {repr(resp)}"
             )
 
+    def query_memory(
+        self,
+        query: str,
+        keywords: list = None,
+        entities: list = None,
+        timeout: float = 10.0,
+    ) -> dict:
+        """
+        核心记忆检索方法 - 供工具和内部调用统一入口
+
+        Args:
+            query: 检索查询语句（陈述句描述目标记忆）
+            keywords: 关键词列表（用于向量检索和图谱查询）
+            entities: 实体列表（用于图谱查询，可选）
+            timeout: 超时时间（秒）
+
+        Returns:
+            dict: {
+                "found": bool,
+                "episodic_memories": ["[日期] 内容", ...],
+                "graph_entities": {"名字": "描述", ...},
+                "graph_relations": ["A 关系 B", ...],
+                "query": str,
+                "keywords": list
+            }
+        """
+        keywords = keywords or []
+        entities = entities or []
+
+        # 从 keywords 中筛选可能的实体名（长度>=2的专有名词）
+        potential_entities = entities or [kw for kw in keywords if len(kw) >= 2]
+
+        logger.info(f"[query_memory] query='{query[:50]}...', keywords={keywords}")
+
+        try:
+            # 并行检索：向量检索 + 图谱查询
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                # 任务1：PostgreSQL 向量检索
+                future_episodic = executor.submit(
+                    self._get_persistence_memory,
+                    {"query": query, "key_words": keywords},
+                )
+
+                # 任务2：Neo4j 图谱查询
+                future_graph = executor.submit(
+                    self._get_graph_memory, potential_entities
+                )
+
+            # 获取向量检索结果
+            raw_memories = future_episodic.result(timeout=timeout)
+            simplified_memories = self._simplify_memories(raw_memories)
+
+            # 获取图谱查询结果
+            graph_context = self._simplify_graph(
+                future_graph.result(timeout=timeout), query=query, key_words=keywords
+            )
+
+            # 统计结果
+            episodic_count = len(simplified_memories)
+            graph_entity_count = len(graph_context.get("entities", {}))
+            found = episodic_count > 0 or graph_entity_count > 0
+
+            logger.info(
+                f"[query_memory] 检索完成: 情景记忆 {episodic_count} 条 | "
+                f"图谱实体 {graph_entity_count} 个"
+            )
+
+            return {
+                "found": found,
+                "episodic_memories": simplified_memories,
+                "graph_entities": graph_context.get("entities", {}),
+                "graph_relations": graph_context.get("relations", []),
+                "query": query,
+                "keywords": keywords,
+            }
+
+        except concurrent.futures.TimeoutError:
+            logger.error("[query_memory] 检索超时")
+            return {
+                "found": False,
+                "episodic_memories": [],
+                "graph_entities": {},
+                "graph_relations": [],
+                "query": query,
+                "keywords": keywords,
+                "error": "检索超时",
+            }
+        except Exception as e:
+            logger.exception(f"[query_memory] 检索失败: {e}")
+            return {
+                "found": False,
+                "episodic_memories": [],
+                "graph_entities": {},
+                "graph_relations": [],
+                "query": query,
+                "keywords": keywords,
+                "error": str(e),
+            }
+
     def load_memory(self, content):
+        """
+        旧接口 - 通过 LLM 判断是否需要检索记忆
+        保留兼容性，内部调用 query_memory
+        """
         system_prompt = settings.CORE_PERSONA + "\n" + settings.MEMORY_JUDGE_PROMPT
         logger.info(f"Loading Memory\n")
         user_prompt = f"提供的日志如下：\n\n{content}"
@@ -92,66 +195,34 @@ class Hippocampus:
             )
             return []
 
-        key_words = []
-        query = ""
-        entities = []
-
         resp_json = self.llm_client._extract_json(resp)
         if resp_json is None:
             logger.error(f"Failed to extract JSON from LLM response: {repr(resp)}")
             return []
 
+        # LLM 判断不需要检索
         if resp_json.get("need_memory", False) is False:
             logger.info("LLM judged that no memory retrieval is needed.")
             return []
+
         try:
-            key_words = resp_json.get("keywords", [])
+            keywords = resp_json.get("keywords", [])
             query = resp_json.get("query", "")
             entities = resp_json.get("entities", [])
 
-            # 并行检索：向量检索 + 图谱查询
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 任务1：PostgreSQL 向量检索
-                future_episodic = executor.submit(
-                    self._get_persistence_memory,
-                    {"query": query, "key_words": key_words},
+            # 调用统一的检索方法
+            result = self.query_memory(query, keywords, entities)
+
+            if result.get("found"):
+                logger.info(
+                    f"Road Memory\nQuery: {query}\nKey Words: {keywords}\nEntities: {entities}\n"
                 )
-
-                # 任务2：Neo4j 图谱查询
-                future_graph = executor.submit(self._get_graph_memory, entities)
-
-            # 获取向量检索结果
-            raw_memories = future_episodic.result(timeout=5)
-            simplified_memories = self._simplify_memories(raw_memories)
-
-            # 获取图谱查询结果
-            graph_context = self._simplify_graph(
-                future_graph.result(timeout=5), query=query, key_words=key_words
-            )
-
-            # 整合结果
-            result = {
-                "episodic_memories": simplified_memories,
-                "graph_context": graph_context,
-            }
-            memories = json.dumps(result, ensure_ascii=False)
-
-            logger.info(
-                f"Road Memory\nQuery: {query}\nKey Words: {key_words}\nEntities: {entities}\n"
-            )
-            logger.info(f"Retrieved memory: {len(simplified_memories)} items")
-            if graph_context["entities"]:
-                logger.info(f"Graph entities: {list(graph_context['entities'].keys())}")
-
-            return memories
-
-        except concurrent.futures.TimeoutError:
-            logger.error("检索超时，跳过查询以维持对话。")
+                # 返回旧格式（JSON字符串）保持兼容
+                return json.dumps(result, ensure_ascii=False)
             return []
-        except (TypeError, json.JSONDecodeError) as e:
-            logger.error(
-                f"Failed to decode LLM response during memory loading: {e}. Raw response: {repr(resp)}"
-            )
+
+        except Exception as e:
+            logger.error(f"load_memory 失败: {e}")
             return []
 
     def _get_graph_memory(self, entities: list) -> dict:
@@ -175,7 +246,7 @@ class Hippocampus:
         """
         lines = []
         for mem in memories:
-            content = mem.get("content", "")[:180]
+            content = mem.get("content", "")
             time = mem.get("time", "")[:10]  # 只取日期
             lines.append(f"[{time}] {content}")
         return lines

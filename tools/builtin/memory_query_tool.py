@@ -39,12 +39,12 @@ class MemoryQueryTool(BaseTool):
         "properties": {
             "query": {
                 "type": "string",
-                "description": "待检索的历史记忆内容描述，使用完整的陈述句描述目标记忆。例如：'第一次见面时的场景和对话'、'关于南京大学的定义和相关经历'。",
+                "description": "待检索的历史记忆内容描述，使用完整的陈述句描述目标记忆。例如：'第一次在南京大学见面时的场景和对话'、'马骏老师问题求解课程的上课地点'。**必须包含具体的人名、地名、时间等关键信息**。",
             },
             "keywords": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "关键词和实体列表（10个以内）。包含人名（真名）、地名、物品、事件、情感词等。例如：['南京大学', '第一次', '喜欢']。用于语义匹配和图谱查询。",
+                "description": "关键词和实体列表（10个以内）。**必须**包含**具体的**人名、地名、物品、事件、情感词等。例如：['南京大学', '第一次', '喜欢', '依鸣', '逸夫馆']。用于语义匹配和图谱查询。",
             },
         },
         "required": ["query", "keywords"],
@@ -52,24 +52,24 @@ class MemoryQueryTool(BaseTool):
 
     examples = [
         {
-            "scenario": "用户询问过去的事",
+            "scenario": "用户询问课程地点",
             "parameters": {
-                "query": "第一次见面时的场景和对话内容",
-                "keywords": ["第一次", "见面", "初遇"],
+                "query": "马骏老师的问题求解课程在哪个教室上课",
+                "keywords": ["马骏", "问题求解", "教室", "上课地点", "逸夫馆"],
             },
         },
         {
-            "scenario": "用户讨论特定实体",
+            "scenario": "用户询问过去的经历",
             "parameters": {
-                "query": "关于南京大学的定义和相关经历",
-                "keywords": ["南京大学", "匡亚明学院", "学校", "校园"],
+                "query": "开学第一天在南京大学帮忙抬行李的场景",
+                "keywords": ["开学", "南京大学", "行李", "帮忙", "九月", "初遇"],
             },
         },
         {
-            "scenario": "用户询问喜好",
+            "scenario": "用户讨论特定人物",
             "parameters": {
-                "query": "依鸣的喜好和兴趣",
-                "keywords": ["喜欢", "爱好", "兴趣", "观鸟", "编程"],
+                "query": "关于依鸣的喜好和兴趣",
+                "keywords": ["依鸣", "喜欢", "爱好", "观鸟", "编程", "兴趣"],
             },
         },
     ]
@@ -88,7 +88,7 @@ class MemoryQueryTool(BaseTool):
         """
         执行记忆检索
 
-        同时调用向量检索和图谱查询，keywords 用于两个系统。
+        直接调用 Hippocampus.query_memory 统一接口
 
         Args:
             params: {
@@ -110,66 +110,19 @@ class MemoryQueryTool(BaseTool):
         if not keywords:
             return ToolResult.fail("缺少关键词 (keywords)")
 
-        # keywords 同时用于向量检索和图谱查询
-        # 筛选可能的实体名（通常是人名、地名等专有名词，长度>=2）
-        potential_entities = [kw for kw in keywords if len(kw) >= 2]
-
         logger.info(
             f"[MemoryQuery] 开始检索: query='{query[:50]}...', keywords={keywords}"
         )
 
-        try:
-            # 并行检索：向量检索 + 图谱查询
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 任务1：PostgreSQL 向量检索
-                future_episodic = executor.submit(
-                    self.hippocampus._get_persistence_memory,
-                    {"query": query, "key_words": keywords},
-                )
+        # 调用统一的检索方法
+        result = self.hippocampus.query_memory(
+            query=query, keywords=keywords, entities=keywords
+        )
 
-                # 任务2：Neo4j 图谱查询（使用关键词作为实体）
-                future_graph = executor.submit(
-                    self.hippocampus._get_graph_memory,
-                    potential_entities,
-                )
+        if "error" in result:
+            return ToolResult.fail(result["error"])
 
-            # 获取向量检索结果
-            raw_memories = future_episodic.result(timeout=10)
-            simplified_memories = self.hippocampus._simplify_memories(raw_memories)
-
-            # 获取图谱查询结果
-            graph_context = self.hippocampus._simplify_graph(
-                future_graph.result(timeout=5), query=query, key_words=keywords
-            )
-
-            # 统计结果
-            episodic_count = len(simplified_memories)
-            graph_entity_count = len(graph_context.get("entities", {}))
-
-            logger.info(
-                f"[MemoryQuery] 检索完成: 情景记忆 {episodic_count} 条 | "
-                f"图谱实体 {graph_entity_count} 个"
-            )
-
-            found = episodic_count > 0 or graph_entity_count > 0
-
-            return ToolResult.ok(
-                data={
-                    "found": found,
-                    "episodic_memories": simplified_memories,
-                    "graph_entities": graph_context.get("entities", {}),
-                    "graph_relations": graph_context.get("relations", []),
-                    "query": query,
-                    "keywords": keywords,
-                }
-            )
-
-        except concurrent.futures.TimeoutError:
-            logger.error("[MemoryQuery] 检索超时")
-            return ToolResult.fail("记忆检索超时，请稍后再试")
-        except Exception as e:
-            logger.exception(f"[MemoryQuery] 检索失败: {e}")
-            return ToolResult.fail(f"检索失败: {str(e)}")
+        return ToolResult.ok(data=result)
 
     def summarize_result(self, result: ToolResult, max_length: int = 200) -> str:
         """

@@ -19,6 +19,7 @@ from tools.base import (
 )
 from tools.registry import ToolRegistry
 from tools.executor import ToolExecutor
+from tools.processor import ToolCallProcessor
 from tools.brain_mixin import ToolEnabledBrain
 from tools.plugin import (
     ToolPluginManager,
@@ -40,6 +41,7 @@ __all__ = [
     # 核心组件
     "ToolRegistry",
     "ToolExecutor",
+    "ToolCallProcessor",
     "ToolEnabledBrain",
     # 插件系统
     "ToolPluginManager",

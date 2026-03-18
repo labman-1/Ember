@@ -9,6 +9,7 @@ from memory.short_term import ShortTermMemory
 import random
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from tools.processor import ToolCallProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class StateManager:
         self._thinking = False
         self.is_sleeping = False
         self.dialogue_count = 0
+
+        # 初始化工具调用处理器
+        self.tool_processor = ToolCallProcessor.create_with_memory_tool(hippocampus)
 
         self.event_bus.subscribe("user_interaction", self._on_llm_state_update)
         self.event_bus.subscribe("system.tick", self._on_tick)
@@ -106,6 +110,77 @@ class StateManager:
             call_type=call_type,
         )
 
+    def _ask_llm_with_tools(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        call_type: str = "state_update",
+        max_iterations: int = 1,
+    ) -> str:
+        """
+        支持工具调用的 LLM 请求
+
+        Args:
+            system_prompt: 系统提示词
+            user_prompt: 用户提示词
+            call_type: 调用类型
+            max_iterations: 最大迭代次数（防止无限循环）
+
+        Returns:
+            LLM 的最终输出（已处理工具调用）
+        """
+        # 构建带工具说明的系统提示
+        enhanced_prompt = self.tool_processor.build_system_prompt_with_tools(
+            system_prompt
+        )
+
+        messages = [
+            {"role": "system", "content": enhanced_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        iteration = 0
+        final_response = ""
+
+        while iteration < max_iterations:
+            iteration += 1
+            response = self.llm_client.one_chat(
+                model_config=settings.SMALL_LLM,
+                messages=messages,
+                call_type=call_type,
+            )
+
+            if not response:
+                break
+
+            # 处理工具调用（带调用来源标识）
+            caller = f"StateManager._ask_llm_with_tools[{call_type}]"
+            result = self.tool_processor.process_llm_output(
+                response, execute=True, caller=caller
+            )
+
+            if not result["has_tool_calls"]:
+                # 没有工具调用，直接返回
+                final_response = response
+                break
+
+            # 有工具调用，将结果反馈给 LLM
+            logger.info(f"[StateManager] 检测到 {len(result['tool_calls'])} 个工具调用")
+
+            # 构建后续消息
+            messages.append({"role": "assistant", "content": response})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"{result['results_text']}\n请根据工具执行结果继续处理。",
+                }
+            )
+
+            # 保存最终清理后的文本
+            final_response = result["clean_text"]
+
+        return final_response
+
     def _async_log(self, filename, content):
         def _log():
             try:
@@ -169,7 +244,8 @@ class StateManager:
         prompt = f"当前的准确时间: {logical_now_str}\n\n[先前状态]\n{json.dumps(self.current_state, ensure_ascii=False)}\n\n[近期对话记录]:\n{json.dumps(history, ensure_ascii=False)}\n\n{settings.STATE_UPDATE_PROMPT}"
 
         try:
-            response = self._ask_llm(
+            # 使用支持工具调用的 LLM 请求
+            response = self._ask_llm_with_tools(
                 settings.CORE_PERSONA, prompt, call_type="state_update"
             )
             if response:
@@ -181,7 +257,8 @@ class StateManager:
                 new_state["对应时间"] = logical_now_str
                 self._update_state(new_state, logical_now=logical_now)
 
-                logger.info(f"[{logical_now_str}] 对话引发状态更新: {new_state}")
+                # 使用压缩格式记录日志
+                logger.info(f"[{logical_now_str}] 对话引发状态更新:{self.state_zip}")
 
         except Exception as e:
             logger.error(f"对话更新失败: {e}")
@@ -217,7 +294,8 @@ class StateManager:
         prompt = user_content + "\n\n" + settings.IDLE_STATE_UPDATE_PROMPT
 
         try:
-            response = self._ask_llm(
+            # 使用支持工具调用的 LLM 请求
+            response = self._ask_llm_with_tools(
                 settings.CORE_PERSONA, prompt, call_type="idle_evolve"
             )
             if response:
@@ -261,7 +339,8 @@ class StateManager:
                         )
                     )
 
-                logger.info(f"[{logical_now_str}] 闲置逻辑演化: {data}")
+                # 使用压缩格式记录日志
+                logger.info(f"[{logical_now_str}] 闲置逻辑演化:{self.state_zip}")
 
         except Exception as e:
             logger.error(f"闲置更新失败: {e}")
