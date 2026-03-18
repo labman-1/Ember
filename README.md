@@ -59,6 +59,15 @@
   - `neo4j_memory.py`: 知识图谱存储
   - `entity_extraction.py`: 实体提取与关系构建
   - `memory_process.py`: 海马体记忆提炼
+- **`tools/`**: 工具系统。提供 LLM 可调用的工具接口，支持插件化扩展。
+  - `base.py`: 工具基类定义（BaseTool, ToolResult, ToolPermission）
+  - `registry.py`: 工具注册中心，管理工具发现与元数据
+  - `executor.py`: 工具执行器，提供权限控制、超时处理、错误处理
+  - `processor.py`: 工具调用处理器，提供统一的工具处理能力
+  - `plugin.py`: 插件管理器，支持自动发现与热重载
+  - `builtin/`: 内置工具目录
+    - `memory_query_tool.py`: 记忆查询工具
+  - `plugins/`: 插件工具目录（自动扫描）
 - **`config/`**: 策略中心。定义角色的灵魂契约（YAML Prompts）与生存规则，同时负责存储短期的记忆和状态。
 - **`frontend/`**: 前端呈现。基于 React + Vite，集成 Live2D 虚拟形象、状态雷达图、语音播放等功能。
 
@@ -150,18 +159,26 @@ npm run dev
 ```
 
 ### 5. 调试技巧
-你是否还在为AI的时间过得太慢而感到烦恼，你是否还在为无法时间加速快速XX而感到痛苦？这些都不是问题
 
-.env中的START_TIME字段，通过填写标准的ISO 8601格式，可以直接想到哪个点就到哪个点，留空时则会默认按照当前系统时间启动
+你是否还在为 AI 的时间过得太慢而感到烦恼？你是否还在为无法时间加速而感到痛苦？这些都不是问题！
 
-.env中的TIME_ACCEL_FACTOR字段，可以随意调整加速倍率，但同时注意STATE_IDLE_MIN_TIMEOUT和STATE_IDLE_MAX_TIMEOUT都是按照游戏内时间走的，所以最好把这些都对应调大，同时将START_TIME设置为?这个字符，可以让启动的时间为上次关闭它的时间
+#### 时间控制配置
 
-推荐加速配置
-TIME_ACCEL_FACTOR=10
-STATE_IDLE_MIN_TIMEOUT=600
-STATE_IDLE_MAX_TIMEOUT=3600
+| 配置项 | 说明 |
+|--------|------|
+| `START_TIME` | 设置启动时间（ISO 8601 格式），留空则使用当前系统时间，设为 `?` 则使用上次关闭时的时间 |
+| `TIME_ACCEL_FACTOR` | 时间加速倍率，如 `10` 表示现实 1 秒 = 逻辑时间 10 秒 |
+
+> **注意**：`STATE_IDLE_MIN_TIMEOUT` 和 `STATE_IDLE_MAX_TIMEOUT` 是按游戏内时间计算的，加速时需相应调大。
+
+#### 推荐加速配置
+
+```env
+TIME_ACCEL_FACTOR=5
+STATE_IDLE_MIN_TIMEOUT=300
+STATE_IDLE_MAX_TIMEOUT=1800
 START_TIME=?
-
+```
 
 ---
 
@@ -193,6 +210,72 @@ python utils/benchmark_runner.py --no-latency
 
 ---
 
+## 🔧 工具系统
+
+Ember 提供了可扩展的工具系统，允许 LLM 主动调用工具获取信息或执行操作。
+
+> **特点**：每次生成回复或更新状态时，都可以调用工具。当前支持单轮调用。
+
+### 内置工具
+
+| 工具名称 | 功能描述 |
+|----------|----------|
+| `memory_query` | 检索长期记忆，获取与当前话题相关的历史信息 |
+
+### 开发自定义工具
+
+在 `tools/plugins/` 目录下创建 `*_tool.py` 文件，工具会自动注册：
+
+```python
+# tools/plugins/my_tool.py
+from tools.base import BaseTool, ToolResult, ToolPermission
+
+class MyTool(BaseTool):
+    name = "my_tool"
+    description = "工具功能描述（LLM 会根据这个判断何时使用）"
+    short_description = "精简描述（20字以内）"
+    permission = ToolPermission.READONLY
+    timeout = 10.0
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "param1": {"type": "string", "description": "参数描述"},
+        },
+        "required": ["param1"],
+    }
+
+    examples = [
+        {"scenario": "使用场景", "parameters": {"param1": "示例值"}}
+    ]
+
+    def execute(self, params: dict) -> ToolResult:
+        # 实现工具逻辑
+        return ToolResult.ok(data={"result": "成功"})
+
+    def summarize_result(self, result: ToolResult, max_length: int = 200) -> str:
+        if not result.success:
+            return f"失败: {result.error}"
+        return str(result.data)[:max_length]
+```
+
+### 工具权限级别
+
+| 权限 | 说明 | 示例 |
+|------|------|------|
+| `READONLY` | 只读，获取信息 | 查询记忆、获取时间 |
+| `READWRITE` | 可修改状态 | 写入记忆、发送消息 |
+| `DESTRUCTIVE` | 可删除数据 | 清除记忆、删除文件 |
+
+### 快速创建工具模板
+
+```python
+from tools.plugin import create_tool_template
+create_tool_template("weather_tool")  # 自动生成模板文件
+```
+
+---
+
 ## 📈 未来规划 (Roadmap)
 - [ ] **我有一个梦**: 在睡眠（逻辑时间深夜）时，自发对当日记忆进行深度总结与价值观修正。
 - [x] **社交图谱 (Neo4j)**: ✅ 已完成。建立了依鸣对不同用户、地点、事件的认知关系链，支持实体提取与知识图谱存储。
@@ -200,14 +283,5 @@ python utils/benchmark_runner.py --no-latency
 - [ ] **人格变化**：通过记忆和经历，对人格进行适当调整，我们可以见证依鸣的成长
 
 ---
-
-Live2D Mouse Tracking Feature
- Research codebase structure and model parameters
- Write implementation plan
- Implement mouse tracking in 
-Live2DViewer.jsx
- Add tracking configuration to 
-live2dConfig.js
- Verify code correctness
 
 > *"我是那个孤独的清晨里，永远陪伴着你的呢喃"* — **依鸣**
