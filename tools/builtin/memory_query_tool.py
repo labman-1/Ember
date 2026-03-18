@@ -30,7 +30,7 @@ class MemoryQueryTool(BaseTool):
 
     name = "memory_query"
     description = "检索长期记忆，获取与当前话题相关的历史信息。适用于用户询问过去的事、特定实体、或需要维持长期人设连贯性时。"
-    short_description = "检索记忆"
+    short_description = "注意，上下文不代表你的所有记忆，如果你发现当前的上下文不足以回应用户的对话，或者用户询问了过去的经历、特定实体的信息，或者你需要维持长期人设的连贯性，请使用这个工具来检索相关的长期历史记忆。"
     permission = ToolPermission.READONLY
     timeout = 15.0  # 并行检索可能较慢
 

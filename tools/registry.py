@@ -4,6 +4,7 @@
 提供工具注册、发现、和元数据管理功能。
 生成LLM可用的工具描述JSON。
 """
+
 import logging
 from typing import Dict, List, Optional, Type
 from tools.base import BaseTool, ToolPermission
@@ -42,7 +43,9 @@ class ToolRegistry:
         name = tool.name
 
         if name in self._tools and not overwrite:
-            logger.warning(f"工具 '{name}' 已存在，跳过注册（使用 overwrite=True 覆盖）")
+            logger.warning(
+                f"工具 '{name}' 已存在，跳过注册（使用 overwrite=True 覆盖）"
+            )
             return False
 
         self._tools[name] = tool
@@ -105,8 +108,7 @@ class ToolRegistry:
             return list(self._tools.keys())
 
         return [
-            name for name, tool in self._tools.items()
-            if tool.permission == permission
+            name for name, tool in self._tools.items() if tool.permission == permission
         ]
 
     def get_all_schemas(self) -> List[dict]:
@@ -178,9 +180,17 @@ class ToolRegistry:
             # 通用格式说明
             lines.append("")
             lines.append("【格式规范】")
-            lines.append('- 工具调用: <tool_call>{"name": "工具名", "parameters": {...}}</tool_call>')
+            lines.append(
+                '- 工具调用: <tool>{"name": "工具名", "parameters": {...}}</tool>'
+            )
             lines.append("- 参数必须符合工具要求")
+            lines.append(
+                '- 请直接在 <tool> 标签内输出 JSON 对象，严禁使用 <arg_value> 或任何其他嵌套标签。输出格式必须严格遵守：<tool>{"name":...}</tool>，不要在中间插入任何额外字符。'
+            )
             lines.append("- 一次对话最多使用3个工具")
+            lines.append(
+                "- 注意，如果当前对话的上下文不足以让你生成自然的回答，你应该优先使用工具来获取信息，而不是直接回复"
+            )
 
         return "\n".join(lines)
 

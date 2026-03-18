@@ -29,21 +29,9 @@ class ToolEnabledBrain:
                 ToolEnabledBrain.__init__(self, event_bus)
     """
 
-    # 工具调用标签的正则表达式 - 支持多种格式
-    # 格式1: OpenAI风格代码块
-    FUNCTION_CALL_PATTERN = re.compile(
-        r"```tool_call\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE
-    )
-
-    # 格式2: XML标签
-    XML_TOOL_PATTERN = re.compile(
-        r"<tool_call>\s*<name>(.*?)</name>\s*<parameters>(.*?)</parameters>\s*</tool_call>",
+    TOOL_CALL_PATTERN = re.compile(
+        r"<tool>\s*(.*?)\s*</tool>",
         re.DOTALL | re.IGNORECASE,
-    )
-
-    # 格式3: JSON格式
-    JSON_TOOL_PATTERN = re.compile(
-        r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL | re.IGNORECASE
     )
 
     # 最大单次对话工具调用次数，防止循环
@@ -112,32 +100,7 @@ class ToolEnabledBrain:
         """
         calls = []
 
-        # 格式1: 代码块格式 ```tool_call
-        for match in self.FUNCTION_CALL_PATTERN.finditer(text):
-            try:
-                call_data = json.loads(match.group(1))
-                if "name" in call_data:
-                    calls.append(
-                        {
-                            "name": call_data["name"],
-                            "parameters": call_data.get("parameters", {}),
-                        }
-                    )
-            except json.JSONDecodeError as e:
-                logger.debug(f"代码块格式解析失败: {e}")
-
-        # 格式2: XML格式 <tool_call><name>...</name><parameters>...</parameters><tool_call>
-        for match in self.XML_TOOL_PATTERN.finditer(text):
-            try:
-                name = match.group(1).strip()
-                params_str = match.group(2).strip()
-                params = json.loads(params_str) if params_str else {}
-                calls.append({"name": name, "parameters": params})
-            except json.JSONDecodeError as e:
-                logger.debug(f"XML格式解析失败: {e}")
-
-        # 格式3: JSON格式 <tool_call>{"name": ..., "parameters": ...}<tool_call>
-        for match in self.JSON_TOOL_PATTERN.finditer(text):
+        for match in self.TOOL_CALL_PATTERN.finditer(text):
             try:
                 call_data = json.loads(match.group(1))
                 if "name" in call_data:
@@ -162,9 +125,7 @@ class ToolEnabledBrain:
         Returns:
             清理后的文本
         """
-        text = self.FUNCTION_CALL_PATTERN.sub("", text)
-        text = self.XML_TOOL_PATTERN.sub("", text)
-        text = self.JSON_TOOL_PATTERN.sub("", text)
+        text = self.TOOL_CALL_PATTERN.sub("", text)
         return text.strip()
 
     def execute_tool_calls(self, calls: list[dict]) -> list[dict]:
@@ -272,3 +233,10 @@ class ToolEnabledBrain:
     def unregister_tool(self, name: str) -> bool:
         """注销工具"""
         return self.tool_registry.unregister(name)
+
+    def reset_tool_state(self) -> None:
+        """
+        重置工具调用状态（每轮对话开始时应调用）
+        """
+        self._tool_call_count = 0
+        self._tool_results_buffer = []

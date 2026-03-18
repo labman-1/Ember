@@ -248,7 +248,7 @@ class BaseTool(ABC):
             params = ex.get("parameters", {})
             params_json = json.dumps(params, ensure_ascii=False)
             lines.append(f'    用户: {user_msg}')
-            lines.append(f'    调用: <tool_call>{{"name": "{self.name}", "parameters": {params_json}}}</tool_call>')
+            lines.append(f'    调用: <tool>{{"name": "{self.name}", "parameters": {params_json}}}</tool>')
 
         return "\n".join(lines)
 
