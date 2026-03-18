@@ -70,7 +70,7 @@ class ToolCallProcessor:
         timeout: float = DEFAULT_TIMEOUT,
     ) -> "ToolCallProcessor":
         """
-        创建带有 memory_query 工具的处理器
+        创建带有 memory_query 工具的处理器，并自动发现插件工具
 
         Args:
             hippocampus: 海马体实例
@@ -80,10 +80,18 @@ class ToolCallProcessor:
         Returns:
             配置好的处理器实例
         """
+        from tools.plugin import auto_discover_tools
+
         registry = ToolRegistry()
         if hippocampus:
             registry.register(MemoryQueryTool(hippocampus=hippocampus))
             logger.info("已注册内置工具: memory_query")
+
+        # 自动发现 plugins 目录下的工具
+        plugin_count = auto_discover_tools(registry)
+        if plugin_count > 0:
+            logger.info(f"自动发现并注册了 {plugin_count} 个插件工具")
+
         return cls(registry, max_calls, timeout)
 
     def extract_tool_calls(self, text: str) -> List[dict]:

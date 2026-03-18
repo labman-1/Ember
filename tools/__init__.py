@@ -4,7 +4,7 @@ Ember 可拓展工具接口系统
 提供AI角色与外部世界交互的能力：
 - 工具基类定义
 - 工具注册与执行
-- Brain 工具调用集成
+- 工具调用处理器
 - 插件化工具扩展
 """
 
@@ -20,7 +20,6 @@ from tools.base import (
 from tools.registry import ToolRegistry
 from tools.executor import ToolExecutor
 from tools.processor import ToolCallProcessor
-from tools.brain_mixin import ToolEnabledBrain
 from tools.plugin import (
     ToolPluginManager,
     get_plugin_manager,

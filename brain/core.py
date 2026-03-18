@@ -8,12 +8,15 @@ import logging
 from memory.memory_process import Hippocampus
 import json
 from brain.tag_utils import validate_and_fix_llm_output
-from tools.brain_mixin import ToolEnabledBrain
+from tools.processor import ToolCallProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class Brain(ToolEnabledBrain):
+class Brain:
+
+    # 最大单次对话工具调用次数
+    MAX_TOOL_CALLS_PER_TURN = 5
 
     def __init__(
         self,
@@ -22,8 +25,10 @@ class Brain(ToolEnabledBrain):
         memory: ShortTermMemory,
         hippocampus: Hippocampus,
     ):
-        # 先初始化 ToolEnabledBrain (Mixin)
-        ToolEnabledBrain.__init__(self, event_bus, hippocampus)
+        # 工具调用处理器
+        self.tool_processor = ToolCallProcessor.create_with_memory_tool(
+            hippocampus, max_calls=self.MAX_TOOL_CALLS_PER_TURN
+        )
 
         # Brain 自身的属性
         self.lock = threading.Lock()
@@ -31,6 +36,8 @@ class Brain(ToolEnabledBrain):
         self.llm_client = LLMClient()
         self.state_manager = state_manager
         self.memory = memory
+        self.event_bus = event_bus
+        self.hippocampus = hippocampus
 
         # 订阅事件
         self.event_bus.subscribe("user.input", self._on_user_input)
@@ -58,12 +65,10 @@ class Brain(ToolEnabledBrain):
 
         try:
             self._is_processing = True
-            # 重置工具调用状态
-            self.reset_tool_state()
 
             self.memory.add_message("user", user_message)
             # 注入工具说明到 System Prompt
-            enhanced_prompt = self.build_system_prompt_with_tools(
+            enhanced_prompt = self.tool_processor.build_system_prompt_with_tools(
                 settings.SYSTEM_PROMPT
             )
             self.memory.update_base_prompt(enhanced_prompt)
@@ -148,7 +153,7 @@ class Brain(ToolEnabledBrain):
                 iteration += 1
 
                 # 检测并执行工具调用
-                tool_calls = self.extract_tool_calls(full_content)
+                tool_calls = self.tool_processor.extract_tool_calls(full_content)
 
                 if not tool_calls:
                     break  # 没有工具调用，结束循环
@@ -158,15 +163,17 @@ class Brain(ToolEnabledBrain):
                 )
 
                 # 执行工具调用（带调用来源标识）
-                tool_results = self.execute_tool_calls(
+                tool_results = self.tool_processor.execute_tool_calls(
                     tool_calls, caller=f"Brain._llm_speak[iter{iteration}]"
                 )
 
                 # 格式化工具结果
-                tool_results_text = self.format_tool_results_for_prompt(tool_results)
+                tool_results_text = self.tool_processor.format_tool_results_for_prompt(
+                    tool_results
+                )
 
                 # 从原始内容中移除工具调用标签
-                clean_content = self.remove_tool_calls(full_content)
+                clean_content = self.tool_processor.remove_tool_calls(full_content)
 
                 # 如果有工具结果，需要让 LLM 继续生成回复
                 if tool_results_text:
@@ -217,9 +224,9 @@ class Brain(ToolEnabledBrain):
                     break
 
             # 确保移除所有工具调用标签（防止 LLM 在工具执行后又输出工具调用）
-            if self.has_tool_calls(full_content):
+            if self.tool_processor.has_tool_calls(full_content):
                 logger.warning("[Tool] 最终输出仍包含工具调用标签，强制清理")
-                full_content = self.remove_tool_calls(full_content)
+                full_content = self.tool_processor.remove_tool_calls(full_content)
 
             # 修复可能不完整的标签
             full_content = validate_and_fix_llm_output(full_content)
