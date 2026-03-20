@@ -140,7 +140,27 @@ class EmberServer:
                 "state": self.state_manager.current_state,
                 "logical_time": self.event_bus.formatted_logical_now,
                 "is_thinking": self.state_manager.is_thinking,
+                "time_accel_factor": self.event_bus.time_accel_factor,
             }
+
+        class TimeAccelRequest(BaseModel):
+            factor: float
+
+        @self.app.post("/config/time_accel")
+        async def set_time_accel(request: TimeAccelRequest):
+            """动态设置时间加速因子"""
+            if request.factor <= 0:
+                raise HTTPException(status_code=400, detail="时间加速因子必须大于0")
+
+            success = self.event_bus.set_time_accel_factor(request.factor)
+            if success:
+                return {
+                    "success": True,
+                    "time_accel_factor": self.event_bus.time_accel_factor,
+                    "logical_time": self.event_bus.formatted_logical_now,
+                }
+            else:
+                raise HTTPException(status_code=500, detail="设置时间加速因子失败")
 
         @self.app.get("/history")
         async def get_history(limit: int = 20, before: int = None):

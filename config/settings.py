@@ -72,16 +72,17 @@ class Settings:
     GRAPH_CONSOLIDATION_PROMPT = PROMPTS.get("graph_consolidation_prompt", "")
     TOOL_USAGE_GUIDELINES = PROMPTS.get("tool_usage_guidelines", "")
 
-    STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600"))
-    STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30"))
+    TIME_ACCEL_FACTOR = float(os.getenv("TIME_ACCEL_FACTOR", "1.0"))
+
+    # 空闲超时时间：配置值为真实世界秒数，内部乘以加速因子转换为系统时间
+    STATE_IDLE_MIN_TIMEOUT = int(os.getenv("STATE_IDLE_MIN_TIMEOUT", "30")) * int(TIME_ACCEL_FACTOR)
+    STATE_IDLE_MAX_TIMEOUT = int(os.getenv("STATE_IDLE_MAX_TIMEOUT", "3600")) * int(TIME_ACCEL_FACTOR)
 
     IDLE_STATE_UPDATE_PROMPT = PROMPTS.get("idle_state_update_prompt", "")
     IDLE_SPEAKING_UPDATE_PROMPT = PROMPTS.get("idle_speaking_update_prompt", "")
     STATE_UPDATE_INTERVAL = int(
         os.getenv("STATE_UPDATE_INTERVAL", "1")
     )  # 每几轮对话更新一次状态
-
-    TIME_ACCEL_FACTOR = float(os.getenv("TIME_ACCEL_FACTOR", "1.0"))
     START_TIME = os.getenv(
         "START_TIME",
         time.time(),

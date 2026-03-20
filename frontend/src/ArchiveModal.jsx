@@ -12,6 +12,7 @@ function ArchiveModal({ isOpen, onClose }) {
     const [newSlotName, setNewSlotName] = useState('');
     const [newSlotDesc, setNewSlotDesc] = useState('');
     const [error, setError] = useState('');
+    const [timeAccelFactor, setTimeAccelFactor] = useState(1.0);
 
     // 加载存档列表
     const loadArchives = async () => {
@@ -27,9 +28,37 @@ function ArchiveModal({ isOpen, onClose }) {
         }
     };
 
+    // 加载时间加速因子
+    const fetchTimeAccel = async () => {
+        try {
+            const res = await fetch('http://localhost:8000/config');
+            const data = await res.json();
+            if (data.time_accel_factor !== undefined) {
+                setTimeAccelFactor(data.time_accel_factor);
+            }
+        } catch (err) {
+            console.error('获取时间加速因子失败:', err);
+        }
+    };
+
+    // 设置时间加速因子
+    const handleTimeAccelChange = async (newFactor) => {
+        setTimeAccelFactor(newFactor);
+        try {
+            await fetch('http://localhost:8000/config/time_accel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ factor: newFactor }),
+            });
+        } catch (err) {
+            console.error('设置时间加速因子失败:', err);
+        }
+    };
+
     useEffect(() => {
         if (isOpen) {
             loadArchives();
+            fetchTimeAccel();
             setError('');
         }
     }, [isOpen]);
@@ -260,6 +289,30 @@ function ArchiveModal({ isOpen, onClose }) {
                     <button className="archive-close-btn" onClick={onClose}>
                         <CloseIcon />
                     </button>
+                </div>
+
+                {/* 时间加速控制 */}
+                <div className="time-accel-section">
+                    <div className="time-accel-header">
+                        <span className="time-accel-label">时间加速</span>
+                        <span className="time-accel-value">{timeAccelFactor}x</span>
+                    </div>
+                    <input
+                        type="range"
+                        className="time-accel-slider"
+                        min="0.5"
+                        max="20"
+                        step="0.5"
+                        value={timeAccelFactor}
+                        onChange={(e) => handleTimeAccelChange(parseFloat(e.target.value))}
+                    />
+                    <div className="time-accel-marks">
+                        <span>0.5x</span>
+                        <span>5x</span>
+                        <span>10x</span>
+                        <span>15x</span>
+                        <span>20x</span>
+                    </div>
                 </div>
 
                 {/* 错误提示 */}
