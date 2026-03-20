@@ -219,18 +219,36 @@ class Neo4jImporter(BaseImporter):
         # 匹配 CREATE 语句
         # 节点: CREATE (label {props});
         node_pattern = r"CREATE \(([^)]+)\s+(\{[^}]+\})\);"
-        # 关系: CREATE (a)-[:TYPE {props}]->(b);
-        rel_pattern = r"CREATE \(([^)]+)\)-\[:(\w+)(?:\s+(\{[^}]+\}))?\]->\(([^)]+)\);"
+        # 关系格式1: CREATE (a)-[:TYPE {props}]->(b); (旧格式)
+        rel_pattern_old = (
+            r"CREATE \(([^)]+)\)-\[:(\w+)(?:\s+(\{[^}]+\}))?\]->\(([^)]+)\);"
+        )
+        # 关系格式2: MATCH (a {name: 'xxx'}), (b {name: 'yyy'}) CREATE (a)-[:TYPE {props}]->(b); (新格式)
+        rel_pattern_new = r"MATCH \(\w+\s+\{name:\s*'([^']+)'\}\),\s*\(\w+\s+\{name:\s*'([^']+)'\}\)\s+CREATE\s+\(\w+\)-\[:(\w+)(?:\s+(\{[^}]+\}))?\]->\(\w+\);"
 
         for line in cypher_content.split("\n"):
             line = line.strip()
             if not line or line.startswith("//"):
                 continue
 
-            # 尝试匹配关系
-            rel_match = re.match(rel_pattern, line)
-            if rel_match:
-                from_node, rel_type, rel_props, to_node = rel_match.groups()
+            # 尝试匹配新格式关系 (MATCH ... CREATE ...)
+            rel_match_new = re.match(rel_pattern_new, line)
+            if rel_match_new:
+                from_name, to_name, rel_type, rel_props = rel_match_new.groups()
+                relations.append(
+                    {
+                        "from": from_name,
+                        "to": to_name,
+                        "type": rel_type,
+                        "props": self._parse_props(rel_props) if rel_props else {},
+                    }
+                )
+                continue
+
+            # 尝试匹配旧格式关系 (CREATE (a)-[:TYPE]->(b);)
+            rel_match_old = re.match(rel_pattern_old, line)
+            if rel_match_old:
+                from_node, rel_type, rel_props, to_node = rel_match_old.groups()
                 relations.append(
                     {
                         "from": from_node,
@@ -252,24 +270,122 @@ class Neo4jImporter(BaseImporter):
         return nodes, relations
 
     def _parse_props(self, props_str: str) -> dict:
-        """解析属性字符串为字典"""
-        import re
-
-        if not props_str:
+        """解析属性字符串为字典，支持字符串、数字、列表类型（不使用正则）"""
+        if not props_str or not props_str.strip():
             return {}
 
         props = {}
-        # 匹配 key: value 对
-        pattern = r"(\w+):\s*'([^']*)'|\b(\w+):\s*(\d+\.?\d*)"
-        for match in re.finditer(pattern, props_str):
-            if match.group(1):
-                props[match.group(1)] = match.group(2)
-            elif match.group(3):
-                val = match.group(4)
-                if "." in val:
-                    props[match.group(3)] = float(val)
+        i = 0
+        s = props_str.strip()
+
+        while i < len(s):
+            # 跳过空白和逗号
+            while i < len(s) and s[i] in ' \t\n,':
+                i += 1
+            if i >= len(s):
+                break
+
+            # 解析 key
+            key_start = i
+            while i < len(s) and (s[i].isalnum() or s[i] == '_'):
+                i += 1
+            key = s[key_start:i]
+
+            if not key:
+                i += 1
+                continue
+
+            # 跳过冒号和空白
+            while i < len(s) and s[i] in ' \t\n:':
+                i += 1
+            if i >= len(s):
+                break
+
+            # 解析 value
+            if s[i] == "'":
+                # 字符串
+                i += 1
+                value_chars = []
+                while i < len(s):
+                    if s[i] == '\\' and i + 1 < len(s):
+                        # 处理转义
+                        next_char = s[i + 1]
+                        if next_char == 'n':
+                            value_chars.append('\n')
+                        elif next_char == 't':
+                            value_chars.append('\t')
+                        elif next_char == '\\':
+                            value_chars.append('\\')
+                        elif next_char == "'":
+                            value_chars.append("'")
+                        else:
+                            value_chars.append(next_char)
+                        i += 2
+                    elif s[i] == "'":
+                        i += 1
+                        break
+                    else:
+                        value_chars.append(s[i])
+                        i += 1
+                props[key] = ''.join(value_chars)
+
+            elif s[i] == '[':
+                # 列表
+                i += 1
+                items = []
+                while i < len(s) and s[i] != ']':
+                    # 跳过空白和逗号
+                    while i < len(s) and s[i] in ' \t\n,':
+                        i += 1
+                    if i >= len(s) or s[i] == ']':
+                        break
+                    if s[i] == "'":
+                        # 列表中的字符串
+                        i += 1
+                        item_chars = []
+                        while i < len(s):
+                            if s[i] == '\\' and i + 1 < len(s):
+                                next_char = s[i + 1]
+                                if next_char == 'n':
+                                    item_chars.append('\n')
+                                elif next_char == 't':
+                                    item_chars.append('\t')
+                                elif next_char == '\\':
+                                    item_chars.append('\\')
+                                elif next_char == "'":
+                                    item_chars.append("'")
+                                else:
+                                    item_chars.append(next_char)
+                                i += 2
+                            elif s[i] == "'":
+                                i += 1
+                                break
+                            else:
+                                item_chars.append(s[i])
+                                i += 1
+                        items.append(''.join(item_chars))
+                    else:
+                        i += 1
+                if i < len(s) and s[i] == ']':
+                    i += 1
+                props[key] = items
+
+            elif s[i].isdigit() or (s[i] == '-' and i + 1 < len(s) and s[i + 1].isdigit()):
+                # 数字
+                num_start = i
+                if s[i] == '-':
+                    i += 1
+                while i < len(s) and (s[i].isdigit() or s[i] == '.'):
+                    i += 1
+                num_str = s[num_start:i]
+                if '.' in num_str:
+                    props[key] = float(num_str)
                 else:
-                    props[match.group(3)] = int(val)
+                    props[key] = int(num_str)
+
+            else:
+                # 跳过未知类型
+                i += 1
 
         return props
 
@@ -321,13 +437,13 @@ class Neo4jImporter(BaseImporter):
                         )
                         params = props
 
-                    # 使用 MATCH 找到节点并创建关系
+                    # 使用 MATCH 找到节点并创建关系 (使用 name 属性匹配)
                     cypher = f"""
-                    MATCH (a {{id: $from_id}}), (b {{id: $to_id}})
+                    MATCH (a {{name: $from_name}}), (b {{name: $to_name}})
                     CREATE (a)-[:{rel['type']}{props_str}]->(b)
                     """
-                    params["from_id"] = rel["from"]
-                    params["to_id"] = rel["to"]
+                    params["from_name"] = rel["from"]
+                    params["to_name"] = rel["to"]
 
                     session.run(cypher, **params)
                     created += 1

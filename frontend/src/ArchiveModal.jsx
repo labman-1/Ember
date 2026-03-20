@@ -282,30 +282,7 @@ function ArchiveModal({ isOpen, onClose }) {
                     </div>
                 )}
 
-                {/* 快捷操作 */}
-                <div className="archive-quick-actions">
-                    <button
-                        className="archive-btn archive-btn-primary"
-                        onClick={handleQuickSave}
-                        disabled={operation}
-                    >
-                        <SaveIcon /> 快速存档
-                    </button>
-                    <button
-                        className="archive-btn archive-btn-secondary"
-                        onClick={handleQuickLoad}
-                        disabled={operation}
-                    >
-                        <LoadIcon /> 快速读档
-                    </button>
-                    <button
-                        className="archive-btn archive-btn-create"
-                        onClick={() => setShowCreateForm(!showCreateForm)}
-                        disabled={operation}
-                    >
-                        <AddIcon /> 新建存档
-                    </button>
-                </div>
+
 
                 {/* 创建存档表单 */}
                 {showCreateForm && (
@@ -360,26 +337,49 @@ function ArchiveModal({ isOpen, onClose }) {
                                     key={archive.slot_name || index}
                                     className={`archive-card ${!archive.is_valid ? 'archive-invalid' : ''} ${archive.slot_name?.startsWith('auto_backup') ? 'archive-auto' : ''} ${archive.slot_name === 'quick_save' ? 'archive-quick' : ''}`}
                                 >
-                                    <div className="archive-card-name">
-                                        {archive.slot_name}
-                                    </div>
-                                    <div className="archive-card-row">
-                                        <span className="archive-card-desc">
-                                            {archive.description || '无描述'}
+                                    {/* 头部：名称 + 类型标签 */}
+                                    <div className="archive-card-header">
+                                        <span className="archive-card-name">
+                                            {archive.slot_name}
                                         </span>
+                                        {archive.slot_name === 'quick_save' && (
+                                            <span className="archive-card-badge archive-badge-quick">快速</span>
+                                        )}
+                                        {archive.slot_name?.startsWith('auto_backup') && (
+                                            <span className="archive-card-badge archive-badge-auto">自动</span>
+                                        )}
+                                        {!archive.slot_name?.startsWith('auto_backup') && archive.slot_name !== 'quick_save' && (
+                                            <span className="archive-card-badge archive-badge-manual">手动</span>
+                                        )}
+                                    </div>
+
+                                    {/* 内容：描述 + 时间 + 大小 */}
+                                    <div className="archive-card-body">
+                                        <div className="archive-card-desc">
+                                            {archive.description || '无描述'}
+                                        </div>
+                                        <div className="archive-card-meta">
+                                            <span className="archive-card-time">
+                                                {formatTime(archive.created_at)}
+                                            </span>
+                                            {archive.file_size && (
+                                                <span className="archive-card-size">
+                                                    {formatSize(archive.file_size)}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 操作区 */}
+                                    <div className="archive-card-actions">
                                         <button
                                             className="archive-card-btn archive-card-btn-load"
                                             onClick={() => handleLoad(archive.slot_name)}
                                             disabled={operation || !archive.is_valid}
                                             title="加载此存档"
                                         >
-                                            <LoadIcon />
+                                            <LoadIcon /> 加载
                                         </button>
-                                    </div>
-                                    <div className="archive-card-row">
-                                        <span className="archive-card-date">
-                                            {formatTime(archive.created_at)}
-                                        </span>
                                         <button
                                             className="archive-card-btn archive-card-btn-delete"
                                             onClick={() => handleDelete(archive.slot_name)}
@@ -389,6 +389,7 @@ function ArchiveModal({ isOpen, onClose }) {
                                             <DeleteIcon />
                                         </button>
                                     </div>
+
                                     {!archive.is_valid && (
                                         <div className="archive-card-error">
                                             {archive.error_message || '存档损坏'}
@@ -398,6 +399,31 @@ function ArchiveModal({ isOpen, onClose }) {
                             ))}
                         </div>
                     )}
+                </div>
+
+                {/* 底部操作按钮 */}
+                <div className="archive-footer">
+                    <button
+                        className="archive-btn archive-btn-primary"
+                        onClick={handleQuickSave}
+                        disabled={operation}
+                    >
+                        <SaveIcon /> 快速存档
+                    </button>
+                    <button
+                        className="archive-btn archive-btn-secondary"
+                        onClick={handleQuickLoad}
+                        disabled={operation}
+                    >
+                        <LoadIcon /> 快速读档
+                    </button>
+                    <button
+                        className="archive-btn archive-btn-create"
+                        onClick={() => setShowCreateForm(!showCreateForm)}
+                        disabled={operation}
+                    >
+                        <AddIcon /> 新建存档
+                    </button>
                 </div>
             </div>
         </div>
