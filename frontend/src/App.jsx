@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
 import './App.css'
 import Live2DViewer from './Live2DViewer';
+import ArchiveModal from './ArchiveModal';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -14,6 +15,7 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const thoughtTimerRef = useRef(null);
   const thoughtScrollRef = useRef(null);
   const ws = useRef(null);
@@ -581,6 +583,23 @@ function App() {
         currentEmotion={currentEmotion}
         audio={currentAudio}
         modelPath={config?.live2d?.model_path}
+      />
+
+      {/* 存档按钮 - 右下角 */}
+      <button
+        className="archive-trigger-btn"
+        onClick={() => setShowArchive(true)}
+        title="存档管理"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/>
+        </svg>
+      </button>
+
+      {/* 存档弹窗 */}
+      <ArchiveModal
+        isOpen={showArchive}
+        onClose={() => setShowArchive(false)}
       />
 
       {/* 状态面板 - 放置在右上方 */}
