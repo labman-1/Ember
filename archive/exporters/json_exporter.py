@@ -26,6 +26,7 @@ class JsonExporter(BaseExporter):
     CONFIG_FILES = [
         ("state.json", "state.json"),
         ("chat_memory.json", "chat_memory.json"),
+        ("chat_history.log", "chat_history.log"),
     ]
 
     def __init__(self, output_dir: str, config_dir: str = "./config"):

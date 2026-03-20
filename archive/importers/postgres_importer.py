@@ -113,6 +113,9 @@ class PostgresImporter(BaseImporter):
             stats = {"tables_count": 0, "total_rows": 0, "indexes_rebuilt": 0}
 
             try:
+                # 先清空所有表（无论存档中是否有数据文件）
+                self._clear_all_tables(conn)
+
                 for table in self.TABLES:
                     sql_file = Path(self.source_dir) / f"{table}.sql"
                     if sql_file.exists():
@@ -161,6 +164,34 @@ class PostgresImporter(BaseImporter):
     # 批量导入配置
     BATCH_INSERT_SIZE = 500  # 每批插入的行数
 
+    def _clear_all_tables(self, conn):
+        """
+        清空所有表数据（在导入前调用）
+
+        Args:
+            conn: 数据库连接
+        """
+        try:
+            cursor = conn.cursor()
+            for table in self.TABLES:
+                # 检查表是否存在
+                cursor.execute(
+                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
+                    (table,),
+                )
+                if cursor.fetchone()[0]:
+                    self.logger.info(f"清空表: {table}")
+                    cursor.execute(f"DELETE FROM {table};")
+                    cursor.execute(
+                        f"ALTER SEQUENCE IF EXISTS {table}_id_seq RESTART WITH 1;"
+                    )
+            conn.commit()
+            cursor.close()
+            self.logger.info("已清空所有表")
+        except Exception as e:
+            self.logger.error(f"清空表失败: {e}")
+            conn.rollback()
+
     def _import_table(self, conn, table_name: str, sql_file: Path) -> dict:
         """
         导入单个表 (使用批量插入优化)
@@ -184,15 +215,6 @@ class PostgresImporter(BaseImporter):
             if not cursor.fetchone()[0]:
                 self.logger.warning(f"表 {table_name} 不存在，跳过导入")
                 return {"success": False, "error": f"表 {table_name} 不存在"}
-
-            # 清空表 (先禁用外键检查，避免阻塞)
-            self.logger.info(f"清空表: {table_name}")
-            # 使用 DELETE 代替 TRUNCATE，避免锁表
-            cursor.execute(f"DELETE FROM {table_name};")
-            # 重置序列
-            cursor.execute(
-                f"ALTER SEQUENCE IF EXISTS {table_name}_id_seq RESTART WITH 1;"
-            )
 
             # 读取 SQL 文件
             with open(sql_file, "r", encoding="utf-8") as f:

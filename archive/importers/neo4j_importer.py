@@ -98,16 +98,26 @@ class Neo4jImporter(BaseImporter):
         try:
             from neo4j import GraphDatabase
 
+            driver = self._get_driver()
+
+            # 先清空现有数据（无论存档中是否有数据文件）
+            with driver.session(database=self.database) as session:
+                self._clear_all(session)
+
             cypher_file = Path(self.source_dir) / "neo4j.cypher"
             if not cypher_file.exists():
-                self.logger.info("没有 Neo4j 数据文件，跳过导入")
+                self.logger.info("没有 Neo4j 数据文件，已清空现有数据")
+                driver.close()
                 return ImportResult(
                     success=True,
-                    message="没有 Neo4j 数据",
-                    stats={"enabled": True, "imported": False},
+                    message="已清空 Neo4j 数据（无存档数据）",
+                    stats={
+                        "enabled": True,
+                        "imported": False,
+                        "nodes": 0,
+                        "relations": 0,
+                    },
                 )
-
-            driver = self._get_driver()
 
             # 读取 Cypher 脚本
             with open(cypher_file, "r", encoding="utf-8") as f:
@@ -116,9 +126,6 @@ class Neo4jImporter(BaseImporter):
             stats = {"enabled": True, "nodes": 0, "relations": 0, "errors": 0}
 
             with driver.session(database=self.database) as session:
-                # 清空现有数据
-                self._clear_all(session)
-
                 # 执行 Cypher 脚本
                 stats = self._execute_cypher_script(session, cypher_content)
 
@@ -280,14 +287,14 @@ class Neo4jImporter(BaseImporter):
 
         while i < len(s):
             # 跳过空白和逗号
-            while i < len(s) and s[i] in ' \t\n,':
+            while i < len(s) and s[i] in " \t\n,":
                 i += 1
             if i >= len(s):
                 break
 
             # 解析 key
             key_start = i
-            while i < len(s) and (s[i].isalnum() or s[i] == '_'):
+            while i < len(s) and (s[i].isalnum() or s[i] == "_"):
                 i += 1
             key = s[key_start:i]
 
@@ -296,7 +303,7 @@ class Neo4jImporter(BaseImporter):
                 continue
 
             # 跳过冒号和空白
-            while i < len(s) and s[i] in ' \t\n:':
+            while i < len(s) and s[i] in " \t\n:":
                 i += 1
             if i >= len(s):
                 break
@@ -307,15 +314,15 @@ class Neo4jImporter(BaseImporter):
                 i += 1
                 value_chars = []
                 while i < len(s):
-                    if s[i] == '\\' and i + 1 < len(s):
+                    if s[i] == "\\" and i + 1 < len(s):
                         # 处理转义
                         next_char = s[i + 1]
-                        if next_char == 'n':
-                            value_chars.append('\n')
-                        elif next_char == 't':
-                            value_chars.append('\t')
-                        elif next_char == '\\':
-                            value_chars.append('\\')
+                        if next_char == "n":
+                            value_chars.append("\n")
+                        elif next_char == "t":
+                            value_chars.append("\t")
+                        elif next_char == "\\":
+                            value_chars.append("\\")
                         elif next_char == "'":
                             value_chars.append("'")
                         else:
@@ -327,31 +334,31 @@ class Neo4jImporter(BaseImporter):
                     else:
                         value_chars.append(s[i])
                         i += 1
-                props[key] = ''.join(value_chars)
+                props[key] = "".join(value_chars)
 
-            elif s[i] == '[':
+            elif s[i] == "[":
                 # 列表
                 i += 1
                 items = []
-                while i < len(s) and s[i] != ']':
+                while i < len(s) and s[i] != "]":
                     # 跳过空白和逗号
-                    while i < len(s) and s[i] in ' \t\n,':
+                    while i < len(s) and s[i] in " \t\n,":
                         i += 1
-                    if i >= len(s) or s[i] == ']':
+                    if i >= len(s) or s[i] == "]":
                         break
                     if s[i] == "'":
                         # 列表中的字符串
                         i += 1
                         item_chars = []
                         while i < len(s):
-                            if s[i] == '\\' and i + 1 < len(s):
+                            if s[i] == "\\" and i + 1 < len(s):
                                 next_char = s[i + 1]
-                                if next_char == 'n':
-                                    item_chars.append('\n')
-                                elif next_char == 't':
-                                    item_chars.append('\t')
-                                elif next_char == '\\':
-                                    item_chars.append('\\')
+                                if next_char == "n":
+                                    item_chars.append("\n")
+                                elif next_char == "t":
+                                    item_chars.append("\t")
+                                elif next_char == "\\":
+                                    item_chars.append("\\")
                                 elif next_char == "'":
                                     item_chars.append("'")
                                 else:
@@ -363,22 +370,24 @@ class Neo4jImporter(BaseImporter):
                             else:
                                 item_chars.append(s[i])
                                 i += 1
-                        items.append(''.join(item_chars))
+                        items.append("".join(item_chars))
                     else:
                         i += 1
-                if i < len(s) and s[i] == ']':
+                if i < len(s) and s[i] == "]":
                     i += 1
                 props[key] = items
 
-            elif s[i].isdigit() or (s[i] == '-' and i + 1 < len(s) and s[i + 1].isdigit()):
+            elif s[i].isdigit() or (
+                s[i] == "-" and i + 1 < len(s) and s[i + 1].isdigit()
+            ):
                 # 数字
                 num_start = i
-                if s[i] == '-':
+                if s[i] == "-":
                     i += 1
-                while i < len(s) and (s[i].isdigit() or s[i] == '.'):
+                while i < len(s) and (s[i].isdigit() or s[i] == "."):
                     i += 1
                 num_str = s[num_start:i]
-                if '.' in num_str:
+                if "." in num_str:
                     props[key] = float(num_str)
                 else:
                     props[key] = int(num_str)

@@ -25,6 +25,7 @@ class JsonImporter(BaseImporter):
     CONFIG_FILES = [
         ("state.json", "state.json"),
         ("chat_memory.json", "chat_memory.json"),
+        ("chat_history.log", "chat_history.log"),
     ]
 
     def __init__(self, source_dir: str, config_dir: str = "./config"):
@@ -42,7 +43,8 @@ class JsonImporter(BaseImporter):
         """导入 JSON 配置文件"""
         try:
             imported_files = []
-            stats = {"files_count": 0}
+            cleared_files = []
+            stats = {"files_count": 0, "cleared_count": 0}
 
             for source_name, target_name in self.CONFIG_FILES:
                 source_path = Path(self.source_dir) / source_name
@@ -62,12 +64,27 @@ class JsonImporter(BaseImporter):
 
                     self.logger.debug(f"已导入: {source_name} -> {target_name}")
                 else:
-                    self.logger.warning(f"源文件不存在，跳过: {source_name}")
+                    # 存档中没有该文件，清空目标文件
+                    if target_path.exists():
+                        if target_name.endswith(".json"):
+                            # JSON 文件写入空对象或空数组
+                            with open(target_path, "w", encoding="utf-8") as f:
+                                if target_name == "chat_memory.json":
+                                    f.write("[]")
+                                else:
+                                    f.write("{}")
+                        else:
+                            # 非JSON文件（如 .log）直接清空
+                            with open(target_path, "w", encoding="utf-8") as f:
+                                f.write("")
+                        cleared_files.append(target_name)
+                        stats["cleared_count"] += 1
+                        self.logger.info(f"已清空: {target_name}（存档中无此文件）")
 
             return ImportResult(
                 success=True,
-                message=f"已导入 {stats['files_count']} 个配置文件",
-                data=imported_files,
+                message=f"已导入 {stats['files_count']} 个配置文件，清空 {stats['cleared_count']} 个",
+                data={"imported": imported_files, "cleared": cleared_files},
                 stats=stats,
             )
 
