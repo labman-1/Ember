@@ -35,6 +35,7 @@ data/db/
 data/state/
 data/vector_store/
 data/archives/
+!data/archives/default.ember
 
 *.db
 *.sqlite3
