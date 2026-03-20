@@ -332,7 +332,15 @@ function ArchiveModal({ isOpen, onClose }) {
                         </div>
                     ) : (
                         <div className="archive-gallery">
-                            {archives.map((archive, index) => (
+                            {/* 排序：快速存档 > 手动存档 > 自动备份 */}
+                            {[...archives].sort((a, b) => {
+                                const getType = (archive) => {
+                                    if (archive.slot_name === 'quick_save') return 0;
+                                    if (archive.slot_name?.startsWith('auto_backup')) return 2;
+                                    return 1;
+                                };
+                                return getType(a) - getType(b);
+                            }).map((archive, index) => (
                                 <div
                                     key={archive.slot_name || index}
                                     className={`archive-card ${!archive.is_valid ? 'archive-invalid' : ''} ${archive.slot_name?.startsWith('auto_backup') ? 'archive-auto' : ''} ${archive.slot_name === 'quick_save' ? 'archive-quick' : ''}`}
@@ -391,8 +399,8 @@ function ArchiveModal({ isOpen, onClose }) {
                                     </div>
 
                                     {!archive.is_valid && (
-                                        <div className="archive-card-error">
-                                            {archive.error_message || '存档损坏'}
+                                        <div className="archive-card-error" title={archive.error_message || '存档损坏'}>
+                                            存档损坏
                                         </div>
                                     )}
                                 </div>

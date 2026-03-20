@@ -103,6 +103,9 @@ class EmberServer:
             hippocampus=self.hippocampus,
             heartbeat=self.heartbeat,
             state_manager=self.state_manager,
+            short_term_memory=self.memory,
+            episodic_memory=self.episodic_memory,
+            db_memory=self.db_memory,
         )
 
         self._setup_middleware()

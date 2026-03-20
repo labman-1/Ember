@@ -263,20 +263,26 @@
 /* 画廊式布局 */
 .archive-gallery {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 12px;
 }
 
-/* 存档卡片 */
+/* 存档卡片 - 固定大小 */
 .archive-card {
     background: rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 12px;
+    padding: 10px;
     transition: all 0.2s;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
+    /* 固定尺寸 */
+    width: 100%;
+    min-width: 160px;
+    max-width: 200px;
+    height: 140px;
+    overflow: hidden;
 }
 
 .archive-card:hover {
@@ -303,7 +309,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
 }
 
 .archive-card-name {
@@ -345,7 +351,7 @@
 .archive-card-body {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
 .archive-card-desc {
@@ -360,6 +366,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .archive-card-time {
@@ -373,27 +380,31 @@
 }
 
 .archive-card-error {
-    font-size: 11px;
+    font-size: 10px;
     color: #ff8a8a;
-    padding: 6px 8px;
+    padding: 4px 6px;
     background: rgba(255, 82, 82, 0.1);
-    border-radius: 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-/* 卡片操作区 */
+/* 卡片操作区 - 固定在底部 */
 .archive-card-actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     padding-top: 4px;
+    margin-top: auto;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* 卡片操作按钮 */
 .archive-card-btn {
-    padding: 6px 12px;
+    padding: 4px 10px;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 11px;
     cursor: pointer;
     transition: all 0.2s;
     display: flex;

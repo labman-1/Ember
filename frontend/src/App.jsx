@@ -22,7 +22,7 @@ function App() {
   const listRef = useRef(null);
   const [showLogs, setShowLogs] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(420);
+  const [sidebarWidth, setSidebarWidth] = useState(390);
   const [isResizing, setIsResizing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activeTab, setActiveTab] = useState("chat");
@@ -592,7 +592,7 @@ function App() {
         title="存档管理"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-          <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/>
+          <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
         </svg>
       </button>
 

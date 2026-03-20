@@ -61,6 +61,9 @@ class ArchiveManager:
         hippocampus=None,
         heartbeat=None,
         state_manager=None,
+        short_term_memory=None,
+        episodic_memory=None,
+        db_memory=None,
     ):
         """
         初始化存档管理器
@@ -70,11 +73,17 @@ class ArchiveManager:
             hippocampus: 海马体实例 (可选)
             heartbeat: 心跳实例 (可选)
             state_manager: 状态管理器 (可选)
+            short_term_memory: 短期记忆实例 (可选)
+            episodic_memory: 情景记忆实例 (可选)
+            db_memory: 数据库记忆实例 (可选)
         """
         self.event_bus = event_bus
         self.hippocampus = hippocampus
         self.heartbeat = heartbeat
         self.state_manager = state_manager
+        self.short_term_memory = short_term_memory
+        self.episodic_memory = episodic_memory
+        self.db_memory = db_memory
 
         self.archive_dir = Path(self.ARCHIVE_DIR)
         self.config_dir = Path(self.CONFIG_DIR)
@@ -660,9 +669,14 @@ class ArchiveManager:
 
     def _reload_memory_state(self):
         """重建内存状态"""
-        # 重载状态
+        # 1. 先重载短期记忆（从 chat_memory.json）
+        if self.short_term_memory and hasattr(self.short_term_memory, "_load_memory"):
+            self.short_term_memory._load_memory()
+            logger.debug("短期记忆已重载")
+        # state_manager.short_term_memory 是同一个对象引用，不需要单独更新
+
+        # 2. 再重载状态（从 state.json）
         if self.state_manager:
-            # 重新读取 state.json
             state_path = self.config_dir / "state.json"
             if state_path.exists():
                 with open(state_path, "r", encoding="utf-8") as f:
