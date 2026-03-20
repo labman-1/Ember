@@ -48,6 +48,7 @@ config/chat_history.log
 config/chat_memory.json
 config/state.json
 config/state.json.bak
+config/chat_history.json.bak
 config/chat_memory.json.bak
 
 # =========================

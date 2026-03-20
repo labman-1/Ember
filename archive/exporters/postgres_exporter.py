@@ -312,6 +312,8 @@ class PostgresExporter(BaseExporter):
         Returns:
             格式化后的值列表
         """
+        import json
+
         values = []
         for val in row:
             if val is None:
@@ -331,6 +333,11 @@ class PostgresExporter(BaseExporter):
                         values.append(str(val))
                 else:
                     values.append(str(val))
+            elif isinstance(val, (dict, list)):
+                # JSON 类型使用 json.dumps 序列化（确保双引号格式）
+                json_str = json.dumps(val, ensure_ascii=False)
+                escaped = self._escape_string(json_str)
+                values.append(f"'{escaped}'")
             elif isinstance(val, str):
                 # 完善的字符串转义
                 escaped = self._escape_string(val)
