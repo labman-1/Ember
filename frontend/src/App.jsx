@@ -571,6 +571,19 @@ function App() {
     if (e.key === 'Enter') handleSend();
   };
 
+  const handleLive2DTouch = (part) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      const messageId = Date.now();
+      const actionText = part === 'head' ? "*(用户摸了摸你的头)*" : "*(用户触碰了你的身体)*";
+      ws.current.send(JSON.stringify({
+        sender: "user",
+        format: "text",
+        content: actionText,
+        id: messageId
+      }));
+    }
+  };
+
   return (
     <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
       {/* Toast 提示 */}
@@ -583,6 +596,7 @@ function App() {
         currentEmotion={currentEmotion}
         audio={currentAudio}
         modelPath={config?.live2d?.model_path}
+        onTouch={handleLive2DTouch}
       />
 
       {/* 存档按钮 - 右下角 */}
