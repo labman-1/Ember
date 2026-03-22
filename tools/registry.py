@@ -195,6 +195,9 @@ class ToolRegistry:
             lines.append(
                 "- 如果你检测到对话历史中已有工具调用，你必须立刻根据工具结果生成回复，【绝对禁止】再次调用任何工具。"
             )
+            lines.append(
+                "- 请确保<tool></tool>的工具调用紧接在<thought>之后，以便于筛除。"
+            )
 
         return "\n".join(lines)
 

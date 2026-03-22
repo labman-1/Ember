@@ -48,8 +48,8 @@ class Brain:
         self.event_bus.subscribe("idle_speak", self._on_idle_speak)
 
     def _on_user_input(self, event: Event):
-        user_msg = event.data["text"]
-        thread = threading.Thread(target=self.process_dialogue, args=(user_msg,))
+        user_message = event.data["text"]
+        thread = threading.Thread(target=self.process_dialogue, args=(user_message,))
         thread.start()
 
     def _on_idle_speak(self, event: Event):
@@ -81,6 +81,60 @@ class Brain:
             self._llm_speak(self.memory, pack=True)
         finally:
             self._is_processing = False
+
+    def _stream_with_tag_gate(self, stream_gen, chunk_count: int, max_chunks: int):
+        """流式读取 LLM 输出，屏蔽 <tool> 标签及其后的本轮内容。"""
+        full_content = ""
+        visible_buffer = []
+        tag_buffer = ""
+        inside_tag = False
+        suppress_after_tool = False
+
+        def flush_visible():
+            nonlocal visible_buffer
+            if visible_buffer and not suppress_after_tool:
+                text = "".join(visible_buffer)
+                self.event_bus.publish(Event(name="llm.chunk", data={"text": text}))
+                visible_buffer = []
+
+        for chunk in stream_gen:
+            chunk_count += 1
+            if chunk_count > max_chunks:
+                logger.warning("LLM 输出超过最大限制，截断")
+                break
+
+            full_content += chunk
+
+            for char in chunk:
+                if suppress_after_tool:
+                    continue
+
+                if inside_tag:
+                    tag_buffer += char
+                    if char == ">":
+                        normalized_tag = tag_buffer.strip().lower()
+                        if normalized_tag in ("<thought>", "</thought>"):
+                            visible_buffer.append(tag_buffer)
+                        elif normalized_tag in ("<tool>", "</tool>"):
+                            suppress_after_tool = True
+                        else:
+                            visible_buffer.append(tag_buffer)
+                        tag_buffer = ""
+                        inside_tag = False
+                    continue
+
+                if char == "<":
+                    flush_visible()
+                    inside_tag = True
+                    tag_buffer = "<"
+                    continue
+
+                visible_buffer.append(char)
+
+            if visible_buffer and not inside_tag and not suppress_after_tool:
+                flush_visible()
+
+        return full_content, chunk_count
 
     def _llm_speak(self, memory, pack: bool = False, memories: str = ""):
         # 立即发布 llm.started 事件，让前端尽早显示"正在思考"
@@ -129,16 +183,9 @@ class Brain:
                 model_config=settings.LARGE_LLM,
                 messages=messages,
             )
-
-            for chunk in stream_gen:
-                chunk_count += 1
-                if chunk_count > max_chunks:
-                    logger.warning("LLM 输出超过最大限制，截断")
-                    break
-
-                full_content += chunk
-                self.event_bus.publish(Event(name="llm.chunk", data={"text": chunk}))
-
+            full_content, chunk_count = self._stream_with_tag_gate(
+                stream_gen, chunk_count, max_chunks
+            )
         except Exception as e:
             logger.error(f"LLM 流式调用失败: {e}")
             error_msg = "[系统: AI 响应出现问题，请稍后再试]"
@@ -207,16 +254,10 @@ class Brain:
                             model_config=settings.LARGE_LLM,
                             messages=current_messages,
                         )
-
-                        for chunk in stream_gen:
-                            chunk_count += 1
-                            follow_up_content += chunk
-                            self.event_bus.publish(
-                                Event(name="llm.chunk", data={"text": chunk})
-                            )
-
+                        follow_up_content, chunk_count = self._stream_with_tag_gate(
+                            stream_gen, chunk_count, max_chunks
+                        )
                         full_content = follow_up_content
-
                     except Exception as e:
                         logger.error(f"LLM 工具后续调用失败: {e}")
                         full_content = clean_content
@@ -252,11 +293,9 @@ class Brain:
                         model_config=settings.LARGE_LLM,
                         messages=retry_messages,
                     )
-                    for chunk in stream_gen:
-                        retry_content += chunk
-                        self.event_bus.publish(
-                            Event(name="llm.chunk", data={"text": chunk})
-                        )
+                    retry_content, chunk_count = self._stream_with_tag_gate(
+                        stream_gen, chunk_count, max_chunks
+                    )
                     full_content = retry_content
                 except Exception as e:
                     logger.error(f"LLM 重试生成失败: {e}")
