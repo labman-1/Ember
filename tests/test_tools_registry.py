@@ -4,6 +4,10 @@
 覆盖 ToolRegistry 的注册、发现、查询功能。
 """
 import pytest
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from tools.registry import ToolRegistry
 from tools.base import BaseTool, ToolResult, ToolPermission
 
