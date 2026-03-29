@@ -1,6 +1,11 @@
 import logging
 import re
-from neo4j import GraphDatabase
+try:
+    from neo4j import GraphDatabase
+    NEO4J_AVAILABLE = True
+except ImportError:
+    GraphDatabase = None
+    NEO4J_AVAILABLE = False
 from core.event_bus import EventBus, Event
 from config.settings import settings
 
@@ -19,7 +24,7 @@ class Neo4jGraphMemory:
     def __init__(self, event_bus: EventBus):
         self.event_bus = event_bus
         self.driver = None
-        self.enabled = settings.ENABLE_NEO4J
+        self.enabled = settings.ENABLE_NEO4J and NEO4J_AVAILABLE
         self.apoc_enabled = False  # APOC 插件可用性标志
         self.db_name = getattr(settings, "NEO4J_DB", "neo4j")
 

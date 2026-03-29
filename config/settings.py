@@ -71,6 +71,7 @@ class Settings:
     STATE_UPDATE_PROMPT = PROMPTS.get("state_update_prompt", "")
     GRAPH_CONSOLIDATION_PROMPT = PROMPTS.get("graph_consolidation_prompt", "")
     TOOL_USAGE_GUIDELINES = PROMPTS.get("tool_usage_guidelines", "")
+    PRE_ROUTING_PROMPT = PROMPTS.get("pre_routing_prompt", "")
 
     TIME_ACCEL_FACTOR = float(os.getenv("TIME_ACCEL_FACTOR", "1.0"))
 

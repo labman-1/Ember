@@ -72,13 +72,56 @@ class Brain:
 
             self.memory.add_message("user", user_message)
 
+            # === Pre-Routing 意图识别与预检索 ===
+            dynamic_context = ""
+            try:
+                pre_routing_msg = [
+                    {"role": "system", "content": settings.PRE_ROUTING_PROMPT},
+                    {"role": "user", "content": f"用户最新输入：{user_message}"}
+                ]
+                
+                # 若配置了 SMALL_LLM，优先用它作意图识别加速
+                model_to_use = settings.SMALL_LLM if settings.SMALL_LLM.api_key else settings.LARGE_LLM
+                
+                intent_json_str = self.llm_client.one_chat(
+                    model_config=model_to_use,
+                    messages=pre_routing_msg,
+                    timeout=10,
+                    call_type="pre_routing"
+                )
+                
+                intent_data = self.llm_client._extract_json(intent_json_str) if intent_json_str else {}
+                
+                need_memory = intent_data.get("need_memory", False)
+                memory_query = intent_data.get("memory_query", "")
+                need_search = intent_data.get("need_search", False)
+                search_query = intent_data.get("search_query", "")
+                
+                tool_calls = []
+                if need_memory and memory_query:
+                    # 假定 MemoryQueryTool 是注册的，名字为 memory_query
+                    tool_calls.append({"name": "memory_query", "parameters": {"query": memory_query}})
+                if need_search and search_query:
+                    tool_calls.append({"name": "search_web", "parameters": {"query": search_query}})
+                    
+                if tool_calls:
+                    logger.info(f"[Pre-Routing] 判定执行前置工具: {tool_calls}")
+                    # 使用已有的 tool_processor 并行执行工具
+                    tool_results = self.tool_processor.execute_tool_calls(tool_calls, caller="Pre-Routing")
+                    dynamic_context = self.tool_processor.format_tool_results_for_prompt(tool_results)
+                    
+            except Exception as e:
+                logger.error(f"[Pre-Routing] 意图识别或工具调用失败: {e}")
+            # ==================================
+
             # 异步更新 base_prompt（不阻塞 LLM 调用）
             # 注：实际注入到消息中是在 _llm_speak 中完成的
             self.memory.update_base_prompt(
                 self.tool_processor.build_system_prompt_with_tools(settings.SYSTEM_PROMPT)
             )
 
-            self._llm_speak(self.memory, pack=True)
+            # 将预检索的 context 传给 _llm_speak
+            self._llm_speak(self.memory, pack=True, memories=dynamic_context)
         finally:
             self._is_processing = False
 
@@ -193,8 +236,8 @@ class Brain:
             full_content = error_msg
 
         if full_content:
-            # 多轮工具调用处理
-            max_tool_iterations = 1
+            # 禁用原有的多轮阻塞工具调用处理，改由 Pre-Routing 负责
+            max_tool_iterations = 0
             iteration = 0
             current_messages = messages.copy()
 
