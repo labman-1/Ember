@@ -94,13 +94,20 @@ class Brain:
                 
                 need_memory = intent_data.get("need_memory", False)
                 memory_query = intent_data.get("memory_query", "")
+                memory_keywords = intent_data.get("memory_keywords", [])
                 need_search = intent_data.get("need_search", False)
                 search_query = intent_data.get("search_query", "")
                 
                 tool_calls = []
                 if need_memory and memory_query:
-                    # 假定 MemoryQueryTool 是注册的，名字为 memory_query
-                    tool_calls.append({"name": "memory_query", "parameters": {"query": memory_query}})
+                    # MemoryQueryTool 需要 query 和 keywords 两个必需参数
+                    tool_calls.append({
+                        "name": "memory_query",
+                        "parameters": {
+                            "query": memory_query,
+                            "keywords": memory_keywords if memory_keywords else []
+                        }
+                    })
                 if need_search and search_query:
                     tool_calls.append({"name": "search_web", "parameters": {"query": search_query}})
                     

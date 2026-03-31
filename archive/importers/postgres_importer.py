@@ -133,6 +133,9 @@ class PostgresImporter(BaseImporter):
                 index_result = self._rebuild_vector_indexes(conn)
                 stats["indexes_rebuilt"] = index_result.get("count", 0)
 
+                # 同步所有表的序列
+                self._sync_all_sequences(conn)
+
                 conn.close()
 
                 if failed_tables:
@@ -502,6 +505,36 @@ class PostgresImporter(BaseImporter):
             conn.rollback()
 
         return {"count": rebuilt_count}
+
+    def _sync_all_sequences(self, conn):
+        """
+        同步所有表的序列到 max_id + 1
+
+        Args:
+            conn: 数据库连接
+        """
+        try:
+            cursor = conn.cursor()
+
+            for table in self.TABLES:
+                # 获取表中最大的 id
+                cursor.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}")
+                max_id = cursor.fetchone()[0]
+
+                # 设置序列的下一个值为 max_id + 1
+                next_val = max_id + 1
+                cursor.execute(
+                    f"ALTER SEQUENCE IF EXISTS {table}_id_seq RESTART WITH {next_val};"
+                )
+                self.logger.debug(f"已同步序列 {table}_id_seq 到 {next_val}")
+
+            conn.commit()
+            cursor.close()
+            self.logger.info("已同步所有表的序列")
+
+        except Exception as e:
+            self.logger.error(f"同步序列失败: {e}")
+            conn.rollback()
 
     def backup_table(self, conn, table_name: str) -> bool:
         """

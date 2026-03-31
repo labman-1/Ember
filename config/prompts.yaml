@@ -315,16 +315,18 @@ pre_routing_prompt: |
   【决策逻辑】
   1. need_memory: 当用户询问过往的人、事、地点，或者需要了解设定的相关背景时为 true。
   2. memory_query: 用一句完整的陈述句描述希望从长期记忆中找回的事情，包含人物真名和关键信息。
-  3. need_search: 当用户询问当下的现实世界信息（新闻、天气、实时动态）、或者超出一个大一学生常识范畴的专业互联网知识时为 true。
-  4. search_query: 提取给搜索引擎的精简查询词（如"2024 AI 发布 大模型"），避免长句。
+  3. memory_keywords: 从 memory_query 中提取的关键词列表（数组格式，10个以内），包含具体的人名、地名、物品、事件、情感词等。
+  4. need_search: 当用户询问当下的现实世界信息（新闻、天气、实时动态）、或者超出一个大一学生常识范畴的专业互联网知识时为 true。
+  5. search_query: 提取给搜索引擎的精简查询词（如"2024 AI 发布 大模型"），避免长句。
   
   【强制约束】
-  必须且仅输出非Markdown包裹的纯JSON字符串。如果都不需调用，则全置 false 或空串。
+  必须且仅输出非Markdown包裹的纯JSON字符串。如果都不需调用，则全置 false 或空串/空数组。
   
   结构示例:
   {
     "need_memory": true,
-    "memory_query": "关于第一次见面的经历",
+    "memory_query": "关于第一次在南京大学图书馆见面的经历",
+    "memory_keywords": ["南京大学", "图书馆", "第一次", "见面", "初遇"],
     "need_search": false,
     "search_query": ""
   }

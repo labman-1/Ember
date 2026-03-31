@@ -14,6 +14,7 @@ from tools.base import ToolResult
 from tools.registry import ToolRegistry
 from tools.executor import ToolExecutor
 from tools.builtin.memory_query_tool import MemoryQueryTool
+from tools.builtin.web_search_tool import WebSearchTool
 
 if TYPE_CHECKING:
     from memory.memory_process import Hippocampus
@@ -89,6 +90,10 @@ class ToolCallProcessor:
         if hippocampus:
             registry.register(MemoryQueryTool(hippocampus=hippocampus))
             logger.info("已注册内置工具: memory_query")
+
+        # 注册内置工具
+        registry.register(WebSearchTool())
+        logger.info("已注册内置工具: search_web")
 
         # 自动发现 plugins 目录下的工具
         plugin_count = auto_discover_tools(registry)

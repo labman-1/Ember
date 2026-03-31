@@ -68,12 +68,7 @@ function App() {
     { subject: 'D', value: currentState.D || 5, fullMark: 10 },
   ];
 
-  // 当切换到对话标签页时，自动滚动到底部
-  useEffect(() => {
-    if (activeTab === 'chat') {
-      setTimeout(scrollToBottom, 50);
-    }
-  }, [activeTab]);
+  // activeTab 目前未使用，移除自动滚动逻辑
 
   // 自动滚动想法窗口到底部
   useEffect(() => {
@@ -120,6 +115,9 @@ function App() {
   }, [isResizing]);
 
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const shouldAutoScroll = useRef(false); // 用 ref 精确控制是否应该自动滚动
+  const userHasScrolled = useRef(false); // 记录用户是否手动滚动过
+  const isInitialMount = useRef(true); // 记录是否为首次挂载
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorder = useRef(null);
@@ -129,6 +127,17 @@ function App() {
   const nextPlayIndex = useRef(0);
   const isPlaying = useRef(false);
   const audioRef = useRef(null); // 使用 Ref 锁定音频对象
+
+  // 使用原生事件监听滚动，确保可靠性
+  useEffect(() => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+
+    listElement.addEventListener('scroll', handleScroll);
+    return () => {
+      listElement.removeEventListener('scroll', handleScroll);
+    };
+  }, [messages, hasMore, isLoadingHistory, showLogs]); // 依赖项确保回调能访问最新状态
 
   // 获取后端角色配置
   useEffect(() => {
@@ -150,11 +159,11 @@ function App() {
   }, []);
 
   // 加载分页历史记录
-  const loadHistory = async (before = null) => {
-    if (isLoadingHistory || (!hasMore && before)) return;
+  const loadHistory = async (beforeId = null) => {
+    if (isLoadingHistory || (!hasMore && beforeId)) return;
 
     setIsLoadingHistory(true);
-    const url = `http://localhost:8000/history?limit=20${before ? `&before=${before}` : ""}`;
+    const url = `http://localhost:8000/history?limit=20${beforeId ? `&before_id=${beforeId}` : ""}`;
     try {
       const res = await fetch(url);
       const data = await res.json();
@@ -166,25 +175,30 @@ function App() {
         // 统一处理历史记录：数据库返回 DESC，我们需要将其反转为时间正序显示
         const historyData = [...data].reverse();
 
-        if (before) {
+        if (beforeId) {
           // 向上加载更多，需要保持滚动位置
-          const originalHeight = listRef.current?.scrollHeight || 0;
+          const listElement = listRef.current;
+          const originalHeight = listElement?.scrollHeight || 0;
+          const originalScrollTop = listElement?.scrollTop || 0;
           setMessages(prev => [...historyData, ...prev]);
 
-          // 加载完成后恢复滚动位置（会在渲染后处理）
-          setTimeout(() => {
+          // 加载完成后恢复滚动位置（使用 requestAnimationFrame 确保 DOM 更新完成）
+          requestAnimationFrame(() => {
             if (listRef.current) {
               const newHeight = listRef.current.scrollHeight;
-              listRef.current.scrollTop = newHeight - originalHeight;
+              // 保持用户看到的消息位置不变：新滚动位置 = 新高度 - 旧高度 + 旧滚动位置
+              listRef.current.scrollTop = newHeight - originalHeight + originalScrollTop;
+            }
+          });
+        } else {
+          // 初始加载，滚动到底部显示最新消息
+          setMessages(historyData);
+          // 使用 setTimeout 确保 DOM 更新完成后再滚动
+          setTimeout(() => {
+            if (listRef.current) {
+              listRef.current.scrollTop = listRef.current.scrollHeight;
             }
           }, 0);
-        } else {
-          // 初始加载，滚到底部
-          setMessages(historyData);
-          // 增加延迟和多次尝试，确保在内容完全渲染后滚动到底部
-          setTimeout(() => scrollToBottom(), 100);
-          setTimeout(() => scrollToBottom(), 300);
-          setTimeout(() => scrollToBottom(), 500);
         }
       }
     } catch (err) {
@@ -194,14 +208,34 @@ function App() {
     }
   };
 
-  // 监听滚动到顶部
-  const handleScroll = (e) => {
-    if (e.target.scrollTop === 0 && hasMore && !isLoadingHistory && !showLogs) {
-      // 找到目前最早的一条聊天记录的时间（非系统日志）
+  // 原生滚动事件处理函数
+  const handleScroll = () => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = listElement;
+    const isNearTop = scrollTop < 50; // 接近顶部的阈值
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 50; // 接近底部的阈值
+
+    console.log('[handleScroll] scrollTop:', scrollTop, 'scrollHeight:', scrollHeight, 'clientHeight:', clientHeight, 'isNearTop:', isNearTop);
+
+    // 用户手动向上滚动（离开底部），记录用户已手动滚动
+    if (!isNearBottom && !isLoadingHistory) {
+      userHasScrolled.current = true;
+    }
+
+    // 用户滚动到底部，重置手动滚动标记
+    if (isNearBottom) {
+      userHasScrolled.current = false;
+    }
+
+    // 接近顶部时加载更多历史
+    if (isNearTop && hasMore && !isLoadingHistory && !showLogs) {
       const chatMessages = messages.filter(m => m.role !== 'system');
       if (chatMessages.length > 0) {
-        const oldestTimestamp = chatMessages[0].timestamp;
-        loadHistory(oldestTimestamp);
+        const oldestId = chatMessages[0].id;
+        console.log('[handleScroll] 滚动到顶部，准备加载更多，最早消息ID:', oldestId);
+        loadHistory(oldestId);
       }
     }
   };
@@ -215,10 +249,15 @@ function App() {
 
   // 监听消息更新自动滚到底部（仅限新消息进入时）
   useEffect(() => {
-    // 如果消息变长且不是在加载历史，则滚动到底
-    if (!isLoadingHistory && messages.length > 0) {
-      scrollToBottom();
-    }
+    // 如果正在加载历史，不滚动
+    if (isLoadingHistory) return;
+    // 如果用户手动滚动过，不自动滚动
+    if (userHasScrolled.current) return;
+    // 只有明确标记应该滚动时才滚动
+    if (!shouldAutoScroll.current) return;
+    // 滚动到底部后重置标记
+    scrollToBottom();
+    shouldAutoScroll.current = false;
   }, [messages, isLoadingHistory]);
 
   // 播放音频队列
@@ -502,6 +541,9 @@ function App() {
     if (!inputValue.trim()) return;
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       const messageId = Date.now();
+      // 发送消息时标记应该自动滚动，并重置用户手动滚动标记
+      shouldAutoScroll.current = true;
+      userHasScrolled.current = false;
       // 不再在前端本地直接 setMessages，而是通过 WebSocket 发送
       // 后端会通过广播发回带有 logic_now 时间戳的消息，前端再渲染
       ws.current.send(JSON.stringify({
@@ -714,7 +756,7 @@ function App() {
             </svg>
           </button>
         </div>
-        <div className="message-list" ref={listRef} onScroll={handleScroll}>
+        <div className="message-list" ref={listRef}>
           <>
             {isLoadingHistory && (
               <div className="loading-history">加载历史记录中...</div>

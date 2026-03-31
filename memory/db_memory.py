@@ -106,14 +106,26 @@ class DBMemory:
     def start(self):
         threading.Thread(target=self._store_loop, daemon=True).start()
 
-    def get_history(self, limit=20, before_timestamp=None):
+    def get_history(self, limit=20, before_timestamp=None, before_id=None):
         self._ensure_connection()
         if not self.conn:
             return []
 
         try:
             with self.conn.cursor() as cur:
-                if before_timestamp:
+                # 优先使用 before_id（更可靠，避免时区问题）
+                if before_id:
+                    cur.execute(
+                        """
+                        SELECT id, timestamp, sender, text, thinking 
+                        FROM message_list 
+                        WHERE id < %s
+                        ORDER BY id DESC 
+                        LIMIT %s
+                    """,
+                        (before_id, limit),
+                    )
+                elif before_timestamp:
                     if isinstance(before_timestamp, (int, float)):
                         query = "SELECT id, timestamp, sender, text, thinking FROM message_list WHERE timestamp < to_timestamp(%s / 1000.0) ORDER BY timestamp DESC LIMIT %s"
                     else:

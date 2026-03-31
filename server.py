@@ -163,9 +163,9 @@ class EmberServer:
                 raise HTTPException(status_code=500, detail="设置时间加速因子失败")
 
         @self.app.get("/history")
-        async def get_history(limit: int = 20, before: int = None):
+        async def get_history(limit: int = 20, before: int = None, before_id: int = None):
             try:
-                return self.db_memory.get_history(limit=limit, before_timestamp=before)
+                return self.db_memory.get_history(limit=limit, before_timestamp=before, before_id=before_id)
             except Exception as e:
                 logger.error(f"Failed to fetch history: {e}")
                 return []
