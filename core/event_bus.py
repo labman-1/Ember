@@ -70,6 +70,22 @@ class EventBus:
         logger.info(f"时间加速因子已更新为: {factor}")
         return True
 
+    def set_logical_time(self, target_time_str: str):
+        """直接设置逻辑时间（用于存档加载时同步时间）"""
+        try:
+            # 解析目标时间字符串
+            target_logical = time.mktime(
+                time.strptime(target_time_str, "%Y-%m-%d %H:%M:%S")
+            )
+            # 重置基准时间
+            self._base_logical_time = target_logical
+            self._real_start_time = time.time()
+            logger.info(f"逻辑时间已同步到: {target_time_str}")
+            return True
+        except Exception as e:
+            logger.warning(f"设置逻辑时间失败: {e}")
+            return False
+
     def subscribe(self, event_name: str, callback: Callable):
         self._subscribers[event_name].append(callback)
 

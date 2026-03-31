@@ -685,6 +685,15 @@ class ArchiveManager:
                     self.state_manager.current_state = json.load(f)
                 logger.debug("状态已重载")
 
+                # 3. 同步 EventBus 逻辑时间
+                if self.event_bus and hasattr(self.state_manager, "current_state"):
+                    logical_time_str = self.state_manager.current_state.get(
+                        "对应时间", ""
+                    )
+                    if logical_time_str:
+                        self.event_bus.set_logical_time(logical_time_str)
+                        logger.debug(f"逻辑时间已同步: {logical_time_str}")
+
         # 发布状态重载事件
         self._publish_event("state.reload")
 
